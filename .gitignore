@@ -1,0 +1,42 @@
+# ─── STM32CubeIDE / Eclipse build artifacts ───────────────
+Debug/
+Release/
+.metadata/
+.settings/
+.launches/
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.o
+*.d
+*.su
+*.cyclo
+
+# ─── Eclipse local config (keep .project, .cproject, .ioc) ─
+.project.bak
+.cproject.bak
+*.launch
+
+# ─── Python (for the future CAN logger) ───────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# ─── OS / editor cruft ────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# ─── Logs and temp output ─────────────────────────────────
+*.log
+*.tmp
