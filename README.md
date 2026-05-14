@@ -1,96 +1,123 @@
-\# Industrial Safety Monitoring CAN Network
-
-
+# Industrial Safety Monitoring CAN Network
 
 A two-node CAN bus safety system built on STM32, demonstrating embedded safety patterns used in automotive and industrial control: message integrity (CRC, counters), heartbeat/watchdog monitoring, and deterministic safe-state transitions. Python-based CAN traffic logger included for analysis.
 
+**Project status:** 🚧 In progress — Week 1 of 3
 
+## Goals
 
-\*\*Project status:\*\* 🚧 In progress — Week 1 of 3
+- Build a working two-node CAN safety network on real hardware
+- Demonstrate AUTOSAR-flavoured patterns (DEM-like diagnostics, COM-like validation, WdgM-like watchdog) in plain HAL code
+- Produce quantitative timing analysis with a Python logger
+- Document the build day-by-day as a learning record
 
+## Hardware
 
+- 2× STM32 Nucleo-F446RE
+- 2× SN65HVD230 CAN transceivers
+- 1× BME280 temperature/humidity sensor (I2C)
+- 1× SG90 servo motor
+- 1× Innomaker USB-CAN adapter for PC-side logging
+- 120 Ω termination resistors, breadboard, jumper wires
 
-\## Goals
-
-
-
-\- Build a working two-node CAN safety network on real hardware
-
-\- Demonstrate AUTOSAR-flavoured patterns (DEM-like diagnostics, COM-like validation, WdgM-like watchdog) in plain HAL code
-
-\- Produce quantitative timing analysis with a Python logger
-
-\- Document the build day-by-day as a learning record
-
-
-
-\## Hardware
-
-
-
-\- 2× STM32 Nucleo-F446RE
-
-\- 2× SN65HVD230 CAN transceivers
-
-\- 1× BME280 temperature/humidity sensor (I2C)
-
-\- 1× SG90 servo motor
-
-\- 1× Innomaker USB-CAN adapter for PC-side logging
-
-\- 120 Ω termination resistors, breadboard, jumper wires
-
-
-
-\## Repository structure
-
-industrial-safety-can/
-
-├── blink\_test/         # Day 1: toolchain validation, LED blink
-
+## Repository structure
+Industrial Safety Monitoring CAN Network/
+├── blink_test/         # Day 1–2: toolchain validation, LED blink, UART printf
+├── images/             # screenshots and hardware photos, organised by day
 └── ...                 # (more sub-projects added as work progresses)
 
+## Build log
 
+### Week 1 — STM32 basics, I2C sensor, UART debugging
 
-\## Build log
+#### Day 1 (2026-05-13) — Toolchain setup and LED blink
 
+Validated the STM32CubeMX → STM32CubeIDE workflow on a Nucleo-F446RE. Used Board Selector to generate a baseline project — this pre-configures the system clock, PA5 (user LED LD2), PC13 (user button B1), and routes USART2 (PA2/PA3) to the ST-Link virtual COM port. Configured the code generator to emit one `.c/.h` file per peripheral (cleaner than the default single-file dump) and to preserve user code between `/* USER CODE BEGIN ... */` markers on regeneration.
 
+Implemented LED blink three ways to internalise the abstraction layers:
+- `HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin)` — HAL wrapper, function call
+- `GPIOA->ODR ^= GPIO_ODR_OD5` — CMSIS read-modify-write
+- `GPIOA->BSRR = GPIO_BSRR_BS5` — CMSIS atomic single-cycle write (preferred for ISR safety)
 
-\### Week 1 — STM32 basics, I2C sensor, UART debugging
+Covered why the BSRR pattern matters once interrupts share a GPIO port with the main loop — a foundation for the multi-LED status indicators planned for Node A.
 
+<p align="center">
+  <img src="images/day01-blink-toolchain/04-led-blink-hardware.jpeg" width="500">
+  <br>
+  <em>First firmware running on hardware — green LD2 blinking at 1 Hz on the Nucleo-F446RE.</em>
+</p>
 
+<details>
+<summary>Setup screenshots</summary>
 
-\- \*\*Day 1\*\* (2026-05-13) — Toolchain setup complete. STM32CubeMX → STM32CubeIDE workflow validated using Board Selector for Nucleo-F446RE. LED blink (PA5) working using both HAL (`HAL\_GPIO\_TogglePin`) and CMSIS register-level (`GPIOA->BSRR`) approaches. Explored bitmask fundamentals and the difference between read-modify-write (`|=`) and atomic single-write (`BSRR`).
+<p align="center">
+  <img src="images/day01-blink-toolchain/01-cubemx-board-selector-pinout.png" width="700">
+  <br>
+  <em>CubeMX Board Selector pinout view — PA5 (LD2), PA2/PA3 (USART2), PC13 (B1) pre-configured.</em>
+</p>
 
+<p align="center">
+  <img src="images/day01-blink-toolchain/02-cubemx-code-generator-settings.png" width="700">
+  <br>
+  <em>Code Generator settings — per-peripheral file split and user-code preservation enabled.</em>
+</p>
 
+<p align="center">
+  <img src="images/day01-blink-toolchain/03-cubeide-project-structure.png" width="700">
+  <br>
+  <em>Generated project structure in STM32CubeIDE.</em>
+</p>
 
-<!-- Append new entries below as work progresses -->
+</details>
 
+#### Day 2 (2026-05-13) — UART printf debugging via ST-Link virtual COM port
 
+Retargeted stdout to USART2 (115200 8N1) by overriding the `_write()` syscall to forward bytes through `HAL_UART_Transmit`. The Nucleo's onboard ST-Link MCU also acts as a USB-to-serial bridge, so no extra hardware is required for the PC to see the output. Boot banner includes `__DATE__`/`__TIME__` compiler macros — a sanity check that the firmware currently running matches the most recent build.
 
-\## Skills demonstrated
+Implemented an in-line `printf` profiler using `HAL_GetTick()` before and after each print call.
 
+**Measurements:**
+- Boot-to-first-output: ~5 ms (clock-tree stabilisation + boot banner transmission)
+- Each printf at 115200 baud: ~2–3 ms, dominated by serial transmit time (each character ≈87 µs on the wire; `HAL_UART_Transmit` blocks until the last byte has left)
+- Nominal 500 ms `HAL_Delay` loop drifts to 503–505 ms once printing is added — the observer effect on timing
 
+This is the first quantitative observation of how blocking I/O distorts deterministic scheduling — directly motivates the FreeRTOS-vs-bare-metal comparison planned for Project 3.
 
-\*(this section grows as work progresses)\*
+<p align="center">
+  <img src="images/day02-uart-printf/03-putty-printf-profiling.png" width="700">
+  <br>
+  <em>Live UART output in PuTTY showing tick counter, system uptime, and self-measured printf duration.</em>
+</p>
 
+<details>
+<summary>Setup and earlier iteration</summary>
 
+<p align="center">
+  <img src="images/day02-uart-printf/01-cubemx-usart2-config.png" width="700">
+  <br>
+  <em>USART2 configuration in CubeMX: 115200 8N1, hardware flow control disabled.</em>
+</p>
 
-\- STM32 HAL programming — GPIO so far; UART, I2C, CAN coming
+<p align="center">
+  <img src="images/day02-uart-printf/02-putty-tick-counter.png" width="700">
+  <br>
+  <em>First working UART output — boot banner plus tick counter (before adding uptime/profiling).</em>
+</p>
 
-\- CMSIS register-level access (`BSRR`, `ODR`)
+</details>
 
-\- Embedded C: bitmasks, bitwise operators, `volatile`
+## Skills demonstrated
 
-\- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation
+*(this section grows as work progresses)*
 
+- STM32 HAL programming — GPIO and UART so far; I2C, CAN coming
+- CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
+- Embedded C: bitmasks, bitwise operators, `volatile`, syscall retargeting
+- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation
+- Embedded debugging: ST-Link virtual COM port, `printf` over UART, timing measurement with `HAL_GetTick()`
+- Quantitative analysis of blocking I/O overhead
 
-
-\## Author
-
-
+## Author
 
 Swayam Jakhalekar — M.Sc. Control, Computer and Communications Engineering
-
 Technische Hochschule Mittelhessen, Friedberg
-

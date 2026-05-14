@@ -23,7 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -50,7 +51,7 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+int _write(int file, char *ptr, int len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -89,7 +90,9 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  printf("\r\n=== blink_test booted ===\r\n");
+  printf("Build: %s %s\r\n", __DATE__, __TIME__);
+  uint32_t counter = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -99,10 +102,12 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
-	  HAL_Delay(1000);
-	  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-	  HAL_Delay(100);
+	  uint32_t before = HAL_GetTick();
+	  printf("tick %lu  (uptime: %lu ms)\r\n", counter, before);
+	  uint32_t after = HAL_GetTick();
+	  counter++;
+	  printf("(printf took %lu ms)\r\n", after - before);
+	  HAL_Delay(500);
   }
   /* USER CODE END 3 */
 }
@@ -155,7 +160,11 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+int _write(int file, char *ptr, int len)
+{
+    HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
 /* USER CODE END 4 */
 
 /**
