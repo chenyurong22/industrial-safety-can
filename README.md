@@ -106,7 +106,7 @@ This is the first quantitative observation of how blocking I/O distorts determin
 
 </details>
 
-#### Day 3 (2026-05-14) — I2C bus and BME280 sensor discovery
+#### Day 3 (2026-05-15) — I2C bus and BME280 sensor discovery
 
 Enabled I2C1 peripheral on PB8 (SCL) and PB9 (SDA) at 100 kHz Standard Mode via CubeMX. Validated the regeneration workflow: reopened the `.ioc`, enabled a new peripheral, regenerated code, and confirmed that previously-written user code inside `/* USER CODE BEGIN ... */` markers survived intact — this is the workflow that scales as the project grows.
 
