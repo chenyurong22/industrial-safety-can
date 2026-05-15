@@ -118,7 +118,7 @@ Wired a BME280 temperature/humidity/pressure sensor breakout to the Nucleo's Ard
 Covered the HAL address-shifting convention (`<< 1` to make space for the read/write bit) — the most common single source of "I2C silently doesn't work" bugs in STM32 code.
 
 <p align="center">
-  <img src="images/day03-i2c-bme280/02-bme280-wiring.jpg" width="500">
+  <img src="images/day03-i2c-bme280/02-bme280-wiring.jpeg" width="500">
   <br>
   <em>BME280 sensor wired to the Nucleo over I2C — VIN, GND, SCL, SDA on the Arduino-compatible header.</em>
 </p>
