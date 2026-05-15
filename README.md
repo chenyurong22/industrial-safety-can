@@ -70,7 +70,7 @@ Covered why the BSRR pattern matters once interrupts share a GPIO port with the 
 
 </details>
 
-#### Day 2 (2026-05-13) — UART printf debugging via ST-Link virtual COM port
+#### Day 2 (2026-05-14) — UART printf debugging via ST-Link virtual COM port
 
 Retargeted stdout to USART2 (115200 8N1) by overriding the `_write()` syscall to forward bytes through `HAL_UART_Transmit`. The Nucleo's onboard ST-Link MCU also acts as a USB-to-serial bridge, so no extra hardware is required for the PC to see the output. Boot banner includes `__DATE__`/`__TIME__` compiler macros — a sanity check that the firmware currently running matches the most recent build.
 
