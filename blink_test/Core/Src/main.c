@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "i2c.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -89,10 +90,53 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  printf("\r\n=== blink_test booted ===\r\n");
-  printf("Build: %s %s\r\n", __DATE__, __TIME__);
-  uint32_t counter = 0;
+  /* USER CODE BEGIN 2 */
+    printf("\r\n=== blink_test booted ===\r\n");
+    printf("Build: %s %s\r\n", __DATE__, __TIME__);
+
+    /* I2C bus scan */
+    printf("\r\nScanning I2C bus...\r\n");
+    uint8_t found_addr = 0;
+    for (uint8_t addr = 1; addr < 128; addr++) {
+        if (HAL_I2C_IsDeviceReady(&hi2c1, addr << 1, 1, 10) == HAL_OK) {
+            printf("Device found at 0x%02X\r\n", addr);
+            found_addr = addr;
+        }
+    }
+    if (found_addr == 0) {
+        printf("No I2C devices found. Check wiring.\r\n");
+    } else {
+        printf("Scan complete.\r\n");
+
+        /* Read BME280 chip ID (register 0xD0, should return 0x60) */
+        uint8_t chip_id = 0;
+        HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
+            &hi2c1,                  // I2C handle
+            found_addr << 1,         // device address (shifted)
+            0xD0,                    // register address (Chip ID)
+            I2C_MEMADD_SIZE_8BIT,    // register address is 1 byte wide
+            &chip_id,                // buffer to store result
+            1,                       // read 1 byte
+            100                      // timeout in ms
+        );
+
+        if (status == HAL_OK) {
+            printf("Chip ID at 0x%02X register 0xD0: 0x%02X ", found_addr, chip_id);
+            if (chip_id == 0x60) {
+                printf("(BME280 confirmed)\r\n");
+            } else if (chip_id == 0x58) {
+                printf("(BMP280 — pressure only, no humidity)\r\n");
+            } else {
+                printf("(unknown — expected 0x60 for BME280)\r\n");
+            }
+        } else {
+            printf("Failed to read chip ID (HAL status: %d)\r\n", status);
+        }
+    }
+    printf("\r\n");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -102,12 +146,9 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  uint32_t before = HAL_GetTick();
-	  printf("tick %lu  (uptime: %lu ms)\r\n", counter, before);
-	  uint32_t after = HAL_GetTick();
-	  counter++;
-	  printf("(printf took %lu ms)\r\n", after - before);
-	  HAL_Delay(500);
+	  /* USER CODE BEGIN 3 */
+	      HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	      HAL_Delay(500);
   }
   /* USER CODE END 3 */
 }

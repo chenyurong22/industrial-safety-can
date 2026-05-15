@@ -106,16 +106,52 @@ This is the first quantitative observation of how blocking I/O distorts determin
 
 </details>
 
+#### Day 3 (2026-05-14) — I2C bus and BME280 sensor discovery
+
+Enabled I2C1 peripheral on PB8 (SCL) and PB9 (SDA) at 100 kHz Standard Mode via CubeMX. Validated the regeneration workflow: reopened the `.ioc`, enabled a new peripheral, regenerated code, and confirmed that previously-written user code inside `/* USER CODE BEGIN ... */` markers survived intact — this is the workflow that scales as the project grows.
+
+Wired a BME280 temperature/humidity/pressure sensor breakout to the Nucleo's Arduino-compatible header (VIN → 3V3, GND → GND, SCL → D15/PB8, SDA → D14/PB9). Implemented two operations at boot:
+
+1. **I2C bus scanner** — iterates all 127 possible 7-bit addresses, calling `HAL_I2C_IsDeviceReady` on each. Any address that ACKs gets printed.
+2. **Chip ID verification** — once a device is found, reads register `0xD0` via `HAL_I2C_Mem_Read`. The BME280 datasheet guarantees this register returns `0x60`. Matching value confirms not just I2C connectivity, but that the correct sensor type is on the bus (vs. e.g. the older BMP280 which returns `0x58`).
+
+Covered the HAL address-shifting convention (`<< 1` to make space for the read/write bit) — the most common single source of "I2C silently doesn't work" bugs in STM32 code.
+
+<p align="center">
+  <img src="images/day03-i2c-bme280/02-bme280-wiring.jpg" width="500">
+  <br>
+  <em>BME280 sensor wired to the Nucleo over I2C — VIN, GND, SCL, SDA on the Arduino-compatible header.</em>
+</p>
+
+<p align="center">
+  <img src="images/day03-i2c-bme280/03-putty-bme280-detected.png" width="700">
+  <br>
+  <em>Boot output: I2C scanner finds the sensor at 0x76; chip ID read at register 0xD0 returns 0x60, confirming the device is a genuine BME280.</em>
+</p>
+
+<details>
+<summary>CubeMX I2C configuration</summary>
+
+<p align="center">
+  <img src="images/day03-i2c-bme280/01-cubemx-i2c1-config.png" width="700">
+  <br>
+  <em>I2C1 peripheral configured: Standard Mode, 100 kHz, 7-bit addressing. PB8/PB9 auto-routed as SCL/SDA.</em>
+</p>
+
+</details>
+
 ## Skills demonstrated
 
 *(this section grows as work progresses)*
 
-- STM32 HAL programming — GPIO and UART so far; I2C, CAN coming
+- STM32 HAL programming — GPIO, UART, I2C; CAN coming
 - CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
 - Embedded C: bitmasks, bitwise operators, `volatile`, syscall retargeting
-- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation
+- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation and user-code preservation across regenerations
 - Embedded debugging: ST-Link virtual COM port, `printf` over UART, timing measurement with `HAL_GetTick()`
 - Quantitative analysis of blocking I/O overhead
+- I2C bus protocol: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
+- Sensor integration: BME280 wiring (I2C + 3.3V power), chip ID verification pattern
 
 ## Author
 
