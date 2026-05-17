@@ -140,18 +140,42 @@ Covered the HAL address-shifting convention (`<< 1` to make space for the read/w
 
 </details>
 
+#### Day 4 (2026-05-17) — Live temperature, humidity, and pressure readings
+
+Extended the BME280 work from chip-ID discovery to full sensor operation. Created dedicated driver files (`bme280.h` / `bme280.c`) to keep `main.c` focused on application logic — the structural pattern used in production embedded code.
+
+Implementation steps:
+1. **Read 26 bytes of calibration data** from registers `0x88..0xA1` and another 7 bytes from `0xE1..0xE7` at init. Each BME280 chip is factory-calibrated; these coefficients are unique per device and must be read from the chip's non-volatile memory.
+2. **Configure measurement mode** — wrote `0xF2 = 0x01` (humidity oversampling ×1), `0xF4 = 0x27` (temp ×1, pressure ×1, normal continuous mode), `0xF5 = 0xA0` (1000 ms standby, filter off).
+3. **Read 8 bytes of raw measurement** from `0xF7..0xFE` every second — 20-bit raw values for pressure, temperature, and humidity in a single I2C transaction.
+4. **Apply Bosch's compensation algorithm** (datasheet section 4.2.3) — converts raw ADC values plus calibration coefficients into real-world units (°C, %RH, hPa). The math uses `int32_t` and `int64_t` intermediates with careful sign handling; copied verbatim from the official reference driver.
+
+**Live readings confirm:** temperature ~28 °C (sensor self-heats ~2 °C above ambient), humidity ~65% RH, pressure ~998 hPa (consistent with Friedberg elevation). Breathing on the sensor pushes humidity above 80% within two samples, validating that real environmental coupling works.
+
+<p align="center">
+  <img src="images/day04-bme280-readings/01-putty-live-readings.png" width="700">
+  <br>
+  <em>Continuous BME280 readings — temperature, humidity, and pressure printed every second over UART.</em>
+</p>
+
+<details>
+<summary>Driver files and validation</summary>
+
+<p align="center">
+  <img src="images/day04-bme280-readings/02-bme280-C_file.png" width="700">
+  <br>
+  <em>BME280 driver (<code>bme280.c</code>) showing the algorithm, with live readings in PuTTY confirming the math produces valid real-world values.</em>
+</p>
+
 ## Skills demonstrated
 
 *(this section grows as work progresses)*
 
-- STM32 HAL programming — GPIO, UART, I2C; CAN coming
-- CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
-- Embedded C: bitmasks, bitwise operators, `volatile`, syscall retargeting
-- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation and user-code preservation across regenerations
-- Embedded debugging: ST-Link virtual COM port, `printf` over UART, timing measurement with `HAL_GetTick()`
-- Quantitative analysis of blocking I/O overhead
 - I2C bus protocol: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
-- Sensor integration: BME280 wiring (I2C + 3.3V power), chip ID verification pattern
+- Sensor integration: BME280 wiring (I2C + 3.3V power), chip ID verification, factory calibration data handling
+- Driver architecture: separated sensor code into `bme280.h` / `bme280.c` for modularity
+- Fixed-point compensation math: `int32_t` / `int64_t` arithmetic per Bosch datasheet specification
+- Float-formatted printf output via `-u _printf_float` linker flag
 
 ## Author
 
