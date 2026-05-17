@@ -167,6 +167,8 @@ Implementation steps:
   <em>BME280 driver (<code>bme280.c</code>) showing the algorithm, with live readings in PuTTY confirming the math produces valid real-world values.</em>
 </p>
 
+</details>
+
 ## Skills demonstrated
 
 *(this section grows as work progresses)*
