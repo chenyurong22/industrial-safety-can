@@ -169,15 +169,67 @@ Implementation steps:
 
 </details>
 
+#### Day 5 (2026-05-19) — Temperature state classification and transition detection
+
+Built a three-state safety classifier on top of the BME280 driver. Temperature thresholds: `≤ 30 °C → NORMAL`, `30 – 45 °C → WARNING`, `> 45 °C → CRITICAL`. Implemented in three composable pieces:
+
+1. **`classify_state(float)`** — pure function mapping temperature to a `SystemState` enum value. No side effects; trivially testable. Threshold cascade evaluated most-severe-first to prevent overlap bugs.
+2. **Edge-triggered transition detection** — `current_state` vs `previous_state` comparison in the main loop. State-change events are logged prominently with `*** STATE CHANGE: X -> Y ***`, while steady-state samples log normally. Critically, `previous_state` is only updated on detected transitions — the same edge-detection pattern used by debouncers, ISRs, and AUTOSAR's DEM module.
+3. **State-driven feedback** — the LD2 blink rate is derived from the current state (`1 Hz` calm / `4 Hz` warning / `10 Hz` alarm) via `HAL_Delay(blink_interval_ms(state))`. The blink itself becomes a visual state indicator without needing external hardware.
+
+Validated experimentally: pinching the sensor between fingers heats it past 30 °C → WARNING. A phone flashlight held against it pushes past 45 °C → CRITICAL. Both transitions and the reverse directions logged cleanly.
+
+This is the same classify → detect-edge → react pattern that Node A will use in Week 2 to decide when to emit CAN state-change events.
+
+<p align="center">
+  <img src="images/day05-state-machine/03-transition-warning-to-critical.png" width="700">
+  <br>
+  <em>WARNING → CRITICAL transition at 45.4 °C — the threshold crossing is logged with full sensor context plus a prominent state-change marker.</em>
+</p>
+
+<details>
+<summary>Other states and transitions</summary>
+
+<p align="center">
+  <img src="images/day05-state-machine/01-normal-state-steady.png" width="700">
+  <br>
+  <em>Steady NORMAL state at room temperature — uniform output, slow blink rate.</em>
+</p>
+
+<p align="center">
+  <img src="images/day05-state-machine/02-transition-normal-to-warning.png" width="700">
+  <br>
+  <em>NORMAL → WARNING transition triggered by finger contact heating the sensor past 30 °C.</em>
+</p>
+
+<p align="center">
+  <img src="images/day05-state-machine/04-cubeide-code-warning-state.png" width="700">
+  <br>
+  <em>Main loop code with state-aware printf and state-derived blink interval, alongside live WARNING-state output.</em>
+</p>
+
+</details>
+
 ## Skills demonstrated
 
 *(this section grows as work progresses)*
 
+## Skills demonstrated
+
+*(this section grows as work progresses)*
+
+- STM32 HAL programming — GPIO, UART, I2C; CAN coming
+- CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
+- Embedded C: bitmasks, bitwise operators, `volatile`, syscall retargeting, `enum`/`typedef` discipline
+- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation and user-code preservation across regenerations
+- Embedded debugging: ST-Link virtual COM port, `printf` over UART, timing measurement with `HAL_GetTick()`
+- Quantitative analysis of blocking I/O overhead
 - I2C bus protocol: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
 - Sensor integration: BME280 wiring (I2C + 3.3V power), chip ID verification, factory calibration data handling
 - Driver architecture: separated sensor code into `bme280.h` / `bme280.c` for modularity
 - Fixed-point compensation math: `int32_t` / `int64_t` arithmetic per Bosch datasheet specification
 - Float-formatted printf output via `-u _printf_float` linker flag
+- State-machine design: enum-based state representation, threshold classification, edge-triggered transition detection — the foundational pattern for CAN event emission and safety fault logging (mirrors AUTOSAR DEM behaviour)
 
 ## Author
 

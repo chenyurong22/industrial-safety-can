@@ -31,12 +31,17 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef enum {
+    STATE_NORMAL = 0,
+    STATE_WARNING,
+    STATE_CRITICAL
+} SystemState;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define TEMP_NORMAL_MAX    30.0f
+#define TEMP_WARNING_MAX   45.0f
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,13 +52,17 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+static SystemState current_state = STATE_NORMAL;
+static SystemState previous_state = STATE_NORMAL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 int _write(int file, char *ptr, int len);
+SystemState classify_state(float temp_c);
+const char *state_name(SystemState state);
+uint32_t blink_interval_ms(SystemState state);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -113,13 +122,24 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	  float temp_c, hum_pct, press_hpa;
 	      if (BME280_Read(&temp_c, &hum_pct, &press_hpa) == HAL_OK) {
-	          printf("[uptime: %lu ms] T = %.2f °C   H = %.1f %%   P = %.1f hPa\r\n",
-	                 HAL_GetTick(), temp_c, hum_pct, press_hpa);
+	          current_state = classify_state(temp_c);
+
+	          if (current_state != previous_state) {
+	              printf("[uptime: %lu ms] T = %.2f °C   H = %.1f %%   P = %.1f hPa  [%s]  *** STATE CHANGE: %s -> %s ***\r\n",
+	                     HAL_GetTick(), temp_c, hum_pct, press_hpa,
+	                     state_name(current_state),
+	                     state_name(previous_state), state_name(current_state));
+	              previous_state = current_state;
+	          } else {
+	              printf("[uptime: %lu ms] T = %.2f °C   H = %.1f %%   P = %.1f hPa  [%s]\r\n",
+	                     HAL_GetTick(), temp_c, hum_pct, press_hpa,
+	                     state_name(current_state));
+	          }
 	      } else {
 	          printf("Sensor read failed.\r\n");
 	      }
 	      HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-	      HAL_Delay(1000);
+	      HAL_Delay(blink_interval_ms(current_state));
   }
   /* USER CODE END 3 */
 }
@@ -176,6 +196,37 @@ int _write(int file, char *ptr, int len)
 {
     HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
     return len;
+}
+
+SystemState classify_state(float temp_c)
+{
+    if (temp_c > TEMP_WARNING_MAX) {
+        return STATE_CRITICAL;
+    } else if (temp_c > TEMP_NORMAL_MAX) {
+        return STATE_WARNING;
+    } else {
+        return STATE_NORMAL;
+    }
+}
+
+const char *state_name(SystemState state)
+{
+    switch (state) {
+        case STATE_NORMAL:   return "NORMAL  ";
+        case STATE_WARNING:  return "WARNING ";
+        case STATE_CRITICAL: return "CRITICAL";
+        default:             return "UNKNOWN ";
+    }
+}
+
+uint32_t blink_interval_ms(SystemState state)
+{
+    switch (state) {
+        case STATE_NORMAL:   return 1000;  /* slow blink — calm */
+        case STATE_WARNING:  return 250;   /* fast blink — attention */
+        case STATE_CRITICAL: return 100;   /* very fast — alarm */
+        default:             return 1000;
+    }
 }
 /* USER CODE END 4 */
 
