@@ -2,7 +2,7 @@
 
 A two-node CAN bus safety system built on STM32, demonstrating embedded safety patterns used in automotive and industrial control: message integrity (CRC, counters), heartbeat/watchdog monitoring, and deterministic safe-state transitions. Python-based CAN traffic logger included for analysis.
 
-**Project status:** 🚧 In progress — Week 1 of 3
+**Project status:** 🚧 In progress — Week 1 of 2
 
 ## Goals
 
@@ -210,26 +210,82 @@ This is the same classify → detect-edge → react pattern that Node A will use
 
 </details>
 
+#### Day 6 (2026-05-20) — Modular refactor and hysteresis
+
+Two clean-up tasks before introducing CAN complexity next week.
+
+**Refactor.** Extracted the state-machine logic out of `main.c` into its own module: `state_machine.h` (public API, threshold definitions, enum) and `state_machine.c` (implementations). As of Day 6 the codebase has three clear layers: hardware drivers (`bme280.*`), policy (`state_machine.*`), and orchestration (`main.c`). Same architectural pattern as Day 4's BME280 driver — one file per responsibility.
+
+**Hysteresis.** Day 5's threshold-based classifier had a subtle flaw: temperature wobbling near a boundary (e.g. 29.9 ↔ 30.1 °C) would rapidly toggle `NORMAL ↔ WARNING` many times per second. In a real safety system this would generate runaway CAN traffic and bury operators in alarm spam. Fix: separate rising and falling thresholds with a 2 °C deadband.
+
+- `NORMAL → WARNING` triggers at **30.0 °C** (rising)
+- `WARNING → NORMAL` triggers at **28.0 °C** (falling) — must drop 2 °C below entry point
+- `WARNING → CRITICAL` triggers at **45.0 °C** (rising)
+- `CRITICAL → WARNING` triggers at **43.0 °C** (falling)
+
+Implementation: `classify_state()` gained a second argument (`current` state) and a `switch` on it — different threshold logic applies depending on which state you're already in. This is the structure used by industrial thermostats, ECU temperature monitors, and AUTOSAR's diagnostic event qualifiers.
+
+Validated experimentally with two clean transitions: room temperature → finger-warmed past 30 °C → flashlight-heated past 45 °C, with hysteresis holding cleanly at both boundaries (no flicker).
+
+<p align="center">
+  <img src="images/day06-refactor-hysteresis/03-transition-warning-to-critical.png" width="700">
+  <br>
+  <em>WARNING → CRITICAL transition at 45.24 °C — sustained CRITICAL state without flapping back down through the 43 °C exit threshold.</em>
+</p>
+
+<details>
+<summary>Other transitions and module layout</summary>
+
+<p align="center">
+  <img src="images/day06-refactor-hysteresis/01-normal-steady-with-module.png" width="700">
+  <br>
+  <em>Steady NORMAL state at room temperature (~25 °C). Project Explorer (left) shows the new <code>state_machine.c</code> file alongside <code>bme280.c</code>; Outline panel (right) shows <code>state_machine.h</code> contents.</em>
+</p>
+
+<p align="center">
+  <img src="images/day06-refactor-hysteresis/02-transition-normal-to-warning.png" width="700">
+  <br>
+  <em>NORMAL → WARNING transition at 30.48 °C, followed by sustained WARNING state with rising temperature (31.03 → 31.84 °C).</em>
+</p>
+
+</details>
+
+
 ## Skills demonstrated
 
 *(this section grows as work progresses)*
 
-## Skills demonstrated
-
-*(this section grows as work progresses)*
-
-- STM32 HAL programming — GPIO, UART, I2C; CAN coming
-- CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
-- Embedded C: bitmasks, bitwise operators, `volatile`, syscall retargeting, `enum`/`typedef` discipline
-- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation and user-code preservation across regenerations
-- Embedded debugging: ST-Link virtual COM port, `printf` over UART, timing measurement with `HAL_GetTick()`
-- Quantitative analysis of blocking I/O overhead
-- I2C bus protocol: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
-- Sensor integration: BME280 wiring (I2C + 3.3V power), chip ID verification, factory calibration data handling
-- Driver architecture: separated sensor code into `bme280.h` / `bme280.c` for modularity
+### Embedded C
+- Bitmasks and bitwise operators (`<<`, `^=`, `|=`, `&= ~`); `volatile` keyword for memory-mapped I/O
+- `enum` / `typedef` discipline for self-documenting state types
+- Modular architecture: separation into hardware drivers (`bme280.*`), state policy (`state_machine.*`), and application orchestration (`main.c`)
+- Syscall retargeting (`_write`) to redirect `printf` to UART
 - Fixed-point compensation math: `int32_t` / `int64_t` arithmetic per Bosch datasheet specification
-- Float-formatted printf output via `-u _printf_float` linker flag
-- State-machine design: enum-based state representation, threshold classification, edge-triggered transition detection — the foundational pattern for CAN event emission and safety fault logging (mirrors AUTOSAR DEM behaviour)
+- Modular architecture: separation into hardware drivers (`bme280.*`), state policy (`state_machine.*`), and application orchestration (`main.c`)
+
+### STM32 / HAL
+- HAL programming — GPIO, UART, I2C; CAN coming
+- CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
+- STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation
+- `.ioc` regeneration discipline — adding peripherals mid-project (I2C on Day 3) without losing user code
+
+### Communication protocols
+- I2C bus: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
+- UART (115200 8N1): serial debugging via ST-Link virtual COM port
+
+### Sensor integration
+- BME280 wiring (I2C + 3.3V power), chip ID verification pattern
+- Factory calibration data handling (compensation coefficients stored in non-volatile chip memory)
+- Float-formatted `printf` output via `-u _printf_float` linker flag
+
+### Embedded design patterns
+- State-machine design: threshold classification, edge-triggered transition detection (the foundational pattern for CAN event emission and AUTOSAR DEM-style fault logging)
+- Hysteresis: asymmetric rising/falling thresholds to prevent state flapping near boundaries (industrial controller standard practice)
+- Hysteresis: asymmetric rising/falling thresholds to prevent state flapping near boundaries (industrial controller standard practice)
+
+### Debugging and measurement
+- Live UART logging during execution; timing measurement via `HAL_GetTick()`
+- Quantitative analysis of blocking I/O overhead (printf cost ≈ 2–3 ms at 115200 baud)
 
 ## Author
 
