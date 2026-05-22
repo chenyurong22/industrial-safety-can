@@ -250,6 +250,43 @@ Validated experimentally with two clean transitions: room temperature → finger
 
 </details>
 
+#### Day 7 (2026-05-22) — CAN1 peripheral enabled, loopback validation
+
+First CAN milestone. Enabled CAN1 in CubeMX and validated the full TX/RX path in **loopback mode** — the peripheral internally wires its TX line back to its own RX input, bypassing the transceiver and external bus. This lets us exercise the filter, mailboxes, ISR path, and bit timing without needing a second board or wired bus.
+
+**Build sequence:**
+1. Enabled CAN1 in CubeMX, mapped to the available pins on this specific Nucleo board layout (`CAN_MODE_LOOPBACK`, ~500 kbit/s effective). Mapping required board-specific verification — the headline RM pins weren't physically accessible the way the datasheet suggested.
+2. NVIC: enabled `CAN1 RX0 interrupt` so frame-arrival events drive an ISR rather than polling.
+3. Wrote the test fixture: `CAN_TestInit()` configures an accept-all filter (mask = 0), starts the peripheral, activates the FIFO0 notification, and sets up a `tx_header` for standard 11-bit ID `0x123` with 4-byte payload.
+4. Main loop: each iteration increments a counter, calls `HAL_CAN_AddTxMessage` (non-blocking — frame goes to a hardware mailbox and transmits in the background), waits 50 ms, then checks `can_rx_flag` set by the ISR callback.
+
+**Receive path** is interrupt-driven. The hardware FIFO0 raises an IRQ when a frame arrives; CubeMX's `CAN1_RX0_IRQHandler` calls `HAL_CAN_IRQHandler`, which calls the **weak symbol** `HAL_CAN_RxFifo0MsgPendingCallback` — overridden in `main.c` to pull the frame via `HAL_CAN_GetRxMessage` and raise a flag. This is the standard HAL extension pattern. The `volatile` qualifier on the flag is essential — without it the compiler may cache the loop-side read in a register and miss the ISR update.
+
+**Result:** every transmitted frame round-trips through the peripheral and arrives intact at the RX FIFO. Counter increments monotonically, all data bytes match, "OK match" on every cycle.
+
+<p align="center">
+  <img src="images/day07-can-loopback/02-putty-loopback-frames.png" width="700">
+  <br>
+  <em>CAN loopback test: TX increments counter, the ISR callback fires for each frame, RX data matches TX exactly. Eight consecutive successful round trips.</em>
+</p>
+
+<details>
+<summary>Code context and hardware</summary>
+
+<p align="center">
+  <img src="images/day07-can-loopback/01-loopback-success-with-code.png" width="700">
+  <br>
+  <em>CubeIDE Project Explorer shows the new <code>can.c</code> driver alongside <code>bme280.c</code>, <code>state_machine.c</code>; Outline panel shows the CAN handle types and ISR callback registration.</em>
+</p>
+
+<p align="center">
+  <img src="images/day07-can-loopback/03-hardware-setup.jpg" width="500">
+  <br>
+  <em>Hardware setup at end of Day 7 — Nucleo-F446RE with BME280 sensor (I2C, four-wire ribbon at right) and SN65HVD230 CAN transceiver (blue board at bottom-left, wired to STM32 but with CANH/CANL unconnected since loopback mode bypasses the transceiver internally). The transceiver wiring is staged ahead of Day 8's two-node bus setup.</em>
+</p>
+
+</details>
+
 
 ## Skills demonstrated
 
@@ -272,6 +309,8 @@ Validated experimentally with two clean transitions: room temperature → finger
 ### Communication protocols
 - I2C bus: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
 - UART (115200 8N1): serial debugging via ST-Link virtual COM port
+- CAN bus protocol: 11-bit standard frame format, mailbox-based TX, FIFO-based RX, hardware filtering (ID/mask), bit timing configuration
+- CAN loopback mode for peripheral validation without external bus
 
 ### Sensor integration
 - BME280 wiring (I2C + 3.3V power), chip ID verification pattern
@@ -282,10 +321,14 @@ Validated experimentally with two clean transitions: room temperature → finger
 - State-machine design: threshold classification, edge-triggered transition detection (the foundational pattern for CAN event emission and AUTOSAR DEM-style fault logging)
 - Hysteresis: asymmetric rising/falling thresholds to prevent state flapping near boundaries (industrial controller standard practice)
 - Hysteresis: asymmetric rising/falling thresholds to prevent state flapping near boundaries (industrial controller standard practice)
+- HAL weak-symbol callbacks (`HAL_CAN_RxFifo0MsgPendingCallback`) — overriding default empty implementations to handle peripheral events
+- ISR-to-main-loop communication via `volatile` flag variables (mandatory to prevent compiler caching)
 
 ### Debugging and measurement
 - Live UART logging during execution; timing measurement via `HAL_GetTick()`
 - Quantitative analysis of blocking I/O overhead (printf cost ≈ 2–3 ms at 115200 baud)
+- Diagnostic instrumentation via `HAL_CAN_GetError()` and register inspection (MCR/MSR) when peripheral init failed silently
+- Board-specific pin discovery — verifying datasheet pinout claims against actual Nucleo header accessibility
 
 ## Author
 
