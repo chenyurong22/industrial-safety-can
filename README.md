@@ -287,6 +287,44 @@ First CAN milestone. Enabled CAN1 in CubeMX and validated the full TX/RX path in
 
 </details>
 
+#### Day 8 (2026-05-25) — Two-board CAN bus, transceivers carrying real signals
+
+The transition from "peripheral validated" to "real network." Switched CAN1 from loopback to **Normal mode**, wired two SN65HVD230 transceivers via CANH/CANL with **120 Ω termination at each end of the bus**, and built a second Nucleo as a dedicated receiver project. Frames now physically leave the transmitting chip, traverse the differential bus, get ACKed by the receiver, and arrive intact.
+
+**Build sequence:**
+1. Reconfigured the sender's CubeMX: Operating Mode → Normal, bit timing tuned to **500 kbit/s** (Prescaler 6, TimeSeg1 11TQ, TimeSeg2 2TQ on 42 MHz APB1). Pins CAN1_TX = PA12, CAN1_RX = PA11.
+2. Wired both transceivers identically: VCC↔3V3, GND↔GND, TXD↔CAN1_TX, RXD↔CAN1_RX, RS↔GND (high-speed mode). CANH↔CANH and CANL↔CANL between transceivers, with one 120 Ω resistor across CANH-CANL at each end of the bus.
+3. Created `CAN_Receiver_Node` as a separate CubeIDE project (sibling to the sender). Same Workflow A, same per-peripheral file generation, Keep User Code on. Configured CAN1 with identical bit timing to the sender — critical for the two nodes to agree on bit boundaries.
+4. Wrote a minimal receiver: `_write` retarget for UART, `CAN_ReceiverInit` with accept-all filter, weak-symbol RX callback override, main loop that prints every received frame with HAL_GetTick timestamp and a monotonic frame counter.
+
+**Why termination matters.** CAN runs as a differential signal on a twisted pair (or any pair). The bus has a characteristic impedance near 120 Ω. Without termination resistors at each end, the signal reflects off the open wire ends back into the bus, creating standing waves that corrupt the differential. Symptom of forgetting termination: TX failures with `HAL_CAN_GetError` returning `0x40` (ACK error) — the receiver can't read the bits cleanly, so it can't ACK.
+
+**Why Normal mode needs two nodes.** Unlike loopback, Normal mode requires at least one other node on the bus to acknowledge each transmission within the ACK slot. A frame sent into an empty bus fails after the automatic retransmission count is exhausted, and the peripheral eventually transitions to bus-off. With the receiver running and ACKing, the sender's transmissions succeed reliably.
+
+**Result:** Node A transmits a counter-payload frame with ID `0x123`, DLC 4. Node B receives every frame in sequence, no gaps, payload matches exactly. From cold boot, first transmission to first reception completes in 8 ms.
+
+<p align="center">
+  <img src="images/day08-two-board-can/01-dual-projects-with-output.png" width="900">
+  <br>
+  <em>Both projects open in the same CubeIDE workspace (<code>CAN_Sender_Node</code> and <code>CAN_Receiver_Node</code>) with their PuTTY consoles. Left console (COM4 — sender): full boot sequence, CAN init diagnostics, then continuous TX. Right console (COM6 — receiver): independent boot banner, then RX frames matching the sender's payload frame-for-frame starting at 8 ms after Node B comes online.</em>
+</p>
+
+<details>
+<summary>CubeMX configuration and close-up of the dual-console output</summary>
+
+<p align="center">
+  <img src="images/day08-two-board-can/03-cubemx-can1-normal-pinout.png" width="900">
+  <br>
+  <em>CubeMX CAN1 configuration on Nucleo-F446RE: <strong>CAN1_TX → PA12, CAN1_RX → PA11</strong>, Operating Mode <strong>Normal</strong>, Baud Rate 500 kbit/s. Identical configuration applied to both Sender and Receiver projects ensures the two nodes agree on bit timing.</em>
+</p>
+
+<p align="center">
+  <img src="images/day08-two-board-can/02-putty-dual-tx-rx.png" width="900">
+  <br>
+  <em>Close-up of both PuTTY windows showing the full bring-up sequence: sender's init diagnostics (all <code>HAL_OK</code>, CAN error 0x00000000), then steady TX (left); receiver's independent boot, then sequential RX frames (right). Counter increments in lockstep on both sides.</em>
+</p>
+
+</details>
 
 ## Skills demonstrated
 
@@ -311,6 +349,9 @@ First CAN milestone. Enabled CAN1 in CubeMX and validated the full TX/RX path in
 - UART (115200 8N1): serial debugging via ST-Link virtual COM port
 - CAN bus protocol: 11-bit standard frame format, mailbox-based TX, FIFO-based RX, hardware filtering (ID/mask), bit timing configuration
 - CAN loopback mode for peripheral validation without external bus
+- CAN Normal mode operation: differential signaling over CANH/CANL, ACK-based frame validation, multi-node bus
+- CAN bus termination: 120 Ω resistors to match characteristic impedance and prevent signal reflections
+- Bit-timing matching across nodes (Prescaler, BS1, BS2) at 500 kbit/s
 
 ### Sensor integration
 - BME280 wiring (I2C + 3.3V power), chip ID verification pattern
@@ -323,12 +364,14 @@ First CAN milestone. Enabled CAN1 in CubeMX and validated the full TX/RX path in
 - Hysteresis: asymmetric rising/falling thresholds to prevent state flapping near boundaries (industrial controller standard practice)
 - HAL weak-symbol callbacks (`HAL_CAN_RxFifo0MsgPendingCallback`) — overriding default empty implementations to handle peripheral events
 - ISR-to-main-loop communication via `volatile` flag variables (mandatory to prevent compiler caching)
+- Multi-project firmware design: separate CubeIDE projects for distinct nodes, each with its own peripheral configuration and main loop
 
 ### Debugging and measurement
 - Live UART logging during execution; timing measurement via `HAL_GetTick()`
 - Quantitative analysis of blocking I/O overhead (printf cost ≈ 2–3 ms at 115200 baud)
 - Diagnostic instrumentation via `HAL_CAN_GetError()` and register inspection (MCR/MSR) when peripheral init failed silently
 - Board-specific pin discovery — verifying datasheet pinout claims against actual Nucleo header accessibility
+- Dual-PuTTY workflow for two-node embedded systems: independent ST-Link VCP enumeration (COM4 + COM6) for simultaneous TX/RX observation
 
 ## Author
 
