@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>CAN_Sender_Node</name>
+	<name>CAN_Receiver_Node</name>
 	<comment></comment>
 	<projects>
 	</projects>
@@ -32,9 +32,9 @@
 	</natures>
 	<linkedResources>
 		<link>
-			<name>blink_test.ioc</name>
+			<name>node_b_receiver.ioc</name>
 			<type>1</type>
-			<locationURI>copy_PARENT/blink_test.ioc</locationURI>
+			<locationURI>copy_PARENT/node_b_receiver.ioc</locationURI>
 		</link>
 		<link>
 			<name>Drivers/CMSIS/system_stm32f4xx.c</name>
@@ -92,16 +92,6 @@
 			<locationURI>copy_PARENT/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c</locationURI>
 		</link>
 		<link>
-			<name>Drivers/STM32F4xx_HAL_Driver/stm32f4xx_hal_i2c.c</name>
-			<type>1</type>
-			<locationURI>copy_PARENT/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c</locationURI>
-		</link>
-		<link>
-			<name>Drivers/STM32F4xx_HAL_Driver/stm32f4xx_hal_i2c_ex.c</name>
-			<type>1</type>
-			<locationURI>copy_PARENT/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c_ex.c</locationURI>
-		</link>
-		<link>
 			<name>Drivers/STM32F4xx_HAL_Driver/stm32f4xx_hal_pwr.c</name>
 			<type>1</type>
 			<locationURI>copy_PARENT/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr.c</locationURI>
@@ -127,21 +117,6 @@
 			<locationURI>copy_PARENT/Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c</locationURI>
 		</link>
 		<link>
-			<name>Application/User/Core/can.c</name>
-			<type>1</type>
-			<locationURI>copy_PARENT/Core/Src/can.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/gpio.c</name>
-			<type>1</type>
-			<locationURI>copy_PARENT/Core/Src/gpio.c</locationURI>
-		</link>
-		<link>
-			<name>Application/User/Core/i2c.c</name>
-			<type>1</type>
-			<locationURI>copy_PARENT/Core/Src/i2c.c</locationURI>
-		</link>
-		<link>
 			<name>Application/User/Core/main.c</name>
 			<type>1</type>
 			<locationURI>copy_PARENT/Core/Src/main.c</locationURI>
@@ -156,16 +131,11 @@
 			<type>1</type>
 			<locationURI>copy_PARENT/Core/Src/stm32f4xx_it.c</locationURI>
 		</link>
-		<link>
-			<name>Application/User/Core/usart.c</name>
-			<type>1</type>
-			<locationURI>copy_PARENT/Core/Src/usart.c</locationURI>
-		</link>
 	</linkedResources>
 	<variableList>
 		<variable>
 			<name>copy_PARENT</name>
-			<value>file:/E:/Projects/Industrial%20Safety%20Monitoring%20CAN%20Network/blink_test</value>
+			<value>file:/E:/Projects/Industrial%20Safety%20Monitoring%20CAN%20Network/node_b_receiver</value>
 		</variable>
 	</variableList>
 </projectDescription>
