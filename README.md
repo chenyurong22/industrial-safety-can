@@ -287,7 +287,7 @@ First CAN milestone. Enabled CAN1 in CubeMX and validated the full TX/RX path in
 
 </details>
 
-#### Day 8 (2026-05-25) — Two-board CAN bus, transceivers carrying real signals
+#### Day 8 (2026-06-01) — Two-board CAN bus, transceivers carrying real signals
 
 The transition from "peripheral validated" to "real network." Switched CAN1 from loopback to **Normal mode**, wired two SN65HVD230 transceivers via CANH/CANL with **120 Ω termination at each end of the bus**, and built a second Nucleo as a dedicated receiver project. Frames now physically leave the transmitting chip, traverse the differential bus, get ACKed by the receiver, and arrive intact.
 
