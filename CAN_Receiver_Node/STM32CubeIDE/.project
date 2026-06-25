@@ -32,9 +32,9 @@
 	</natures>
 	<linkedResources>
 		<link>
-			<name>node_b_receiver.ioc</name>
+			<name>CAN_Receiver_Node.ioc</name>
 			<type>1</type>
-			<locationURI>copy_PARENT/node_b_receiver.ioc</locationURI>
+			<locationURI>copy_PARENT/CAN_Receiver_Node.ioc</locationURI>
 		</link>
 		<link>
 			<name>Drivers/CMSIS/system_stm32f4xx.c</name>
@@ -135,7 +135,7 @@
 	<variableList>
 		<variable>
 			<name>copy_PARENT</name>
-			<value>file:/E:/Projects/Industrial%20Safety%20Monitoring%20CAN%20Network/node_b_receiver</value>
+			<value>file:/E:/Projects/Industrial%20Safety%20Monitoring%20CAN%20Network/CAN_Receiver_Node</value>
 		</variable>
 	</variableList>
 </projectDescription>

@@ -1,6 +1,7 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
+  * SENDER NODE CODE
   * @file           : main.c
   * @brief          : Main program body
   ******************************************************************************
@@ -18,10 +19,18 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "can.h"
+#include "i2c.h"
+#include "usart.h"
+#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
+#include "bme280.h"
+#include "state_machine.h"
+#include "crc8.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,27 +49,32 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-CAN_HandleTypeDef hcan1;
-
-UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+static SystemState current_state = STATE_NORMAL;
+static SystemState previous_state = STATE_NORMAL;
+
+/* CAN handles */
+CAN_TxHeaderTypeDef tx_header;
 CAN_RxHeaderTypeDef rx_header;
+uint8_t tx_data[8] = {0};
 uint8_t rx_data[8] = {0};
-volatile uint8_t can_rx_flag = 0;
-volatile uint32_t rx_total = 0;
+uint32_t tx_mailbox;
+volatile uint8_t can_rx_flag = 0;  /* set by ISR when frame arrives */
+volatile uint8_t can_rx_count = 0;
+
+static uint8_t msg_counter = 0;  /* wraps at 256 */
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
-static void MX_CAN1_Init(void);
-static void MX_USART2_UART_Init(void);
-/* USER CODE BEGIN PFP */
+
 /* USER CODE BEGIN PFP */
 int _write(int file, char *ptr, int len);
-void CAN_ReceiverInit(void);
-/* USER CODE END PFP */
+void CAN_TestInit(void);
+HAL_StatusTypeDef CAN_SendSensorFrame(float temp_c, SystemState state);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -97,14 +111,24 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_CAN1_Init();
   MX_USART2_UART_Init();
+  MX_I2C1_Init();
+  MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
-  printf("\r\n=== node_b_receiver booted ===\r\n");
-  printf("Build: %s %s\r\n", __DATE__, __TIME__);
+  printf("\r\n=== CAN_Sender_Node booted ===\r\n");
+    printf("Build: %s %s\r\n", __DATE__, __TIME__);
 
-  CAN_ReceiverInit();
-  printf("CAN ready. Waiting for frames...\r\n\r\n");
+    if (BME280_Init() == HAL_OK) {
+        printf("BME280 calibrated and configured.\r\n\r\n");
+    } else {
+        printf("BME280 init FAILED.\r\n\r\n");
+        while (1) { /* halt */ }
+    }
+
+    //* CAN test initialization */
+  CAN_TestInit();
+  printf("CAN initialized in NORMAL mode @ 500 kbit/s.\r\n");
+  printf("Frame format: [counter|temp_int|temp_frac|state|0|0|0|CRC8]\r\n\r\n");
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -113,19 +137,29 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
-	  if (can_rx_flag) {
-	      can_rx_flag = 0;
-	      rx_total++;
-	      printf("[%lu ms] RX #%lu: ID=0x%03lX  DLC=%lu  data=[%02X %02X %02X %02X]\r\n",
-	             HAL_GetTick(), rx_total,
-	             rx_header.StdId, rx_header.DLC,
-	             rx_data[0], rx_data[1], rx_data[2], rx_data[3]);
-	  }
-	  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-	  HAL_Delay(20);
-  }
-  /* USER CODE END 3 */
+	  /* USER CODE BEGIN 3 */
+	        float temp_c, hum_pct, press_hpa;
+	        if (BME280_Read(&temp_c, &hum_pct, &press_hpa) == HAL_OK) {
+	            current_state = classify_state(temp_c, current_state);
+	            if (current_state != previous_state) {
+	                printf("*** STATE: %s -> %s ***\r\n",
+	                       state_name(previous_state), state_name(current_state));
+	                previous_state = current_state;
+	            }
+
+	            if (CAN_SendSensorFrame(temp_c, current_state) == HAL_OK) {
+	                printf("TX #%u: T=%.2f°C state=%s  CRC=0x%02X\r\n",
+	                       (uint8_t)(msg_counter - 1),
+	                       temp_c, state_name(current_state), tx_data[7]);
+	            } else {
+	                printf("TX failed (CAN error: 0x%08lX)\r\n", HAL_CAN_GetError(&hcan1));
+	            }
+	        }
+
+	        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	        HAL_Delay(100);  /* 10 Hz */
+	    }
+	    /* USER CODE END 3 */
 }
 
 /**
@@ -175,114 +209,6 @@ void SystemClock_Config(void)
   }
 }
 
-/**
-  * @brief CAN1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_CAN1_Init(void)
-{
-
-  /* USER CODE BEGIN CAN1_Init 0 */
-
-  /* USER CODE END CAN1_Init 0 */
-
-  /* USER CODE BEGIN CAN1_Init 1 */
-
-  /* USER CODE END CAN1_Init 1 */
-  hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 6;
-  hcan1.Init.Mode = CAN_MODE_NORMAL;
-  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_11TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
-  hcan1.Init.TimeTriggeredMode = DISABLE;
-  hcan1.Init.AutoBusOff = ENABLE;
-  hcan1.Init.AutoWakeUp = DISABLE;
-  hcan1.Init.AutoRetransmission = ENABLE;
-  hcan1.Init.ReceiveFifoLocked = DISABLE;
-  hcan1.Init.TransmitFifoPriority = DISABLE;
-  if (HAL_CAN_Init(&hcan1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN CAN1_Init 2 */
-
-  /* USER CODE END CAN1_Init 2 */
-
-}
-
-/**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART2_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART2_Init 0 */
-
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
-
-}
-
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
-
-  /* USER CODE END MX_GPIO_Init_1 */
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
-
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-
-  /* USER CODE END MX_GPIO_Init_2 */
-}
 
 /* USER CODE BEGIN 4 */
 int _write(int file, char *ptr, int len)
@@ -291,8 +217,12 @@ int _write(int file, char *ptr, int len)
     return len;
 }
 
-void CAN_ReceiverInit(void)
+/* ----------------------------------------------------------
+ * CAN initialization
+ * ---------------------------------------------------------- */
+void CAN_TestInit(void)
 {
+    /* Configure RX filter — accept all standard IDs (mask = 0) */
     CAN_FilterTypeDef filter;
     filter.FilterBank = 0;
     filter.FilterMode = CAN_FILTERMODE_IDMASK;
@@ -306,16 +236,68 @@ void CAN_ReceiverInit(void)
     filter.SlaveStartFilterBank = 14;
     HAL_CAN_ConfigFilter(&hcan1, &filter);
 
+    /* Start CAN peripheral */
     HAL_CAN_Start(&hcan1);
+
+    /* Enable RX FIFO0 interrupt */
     HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+    /* Configure TX header — 8-byte payload for counter + data + CRC */
+    tx_header.StdId = 0x123;
+    tx_header.ExtId = 0;
+    tx_header.IDE = CAN_ID_STD;
+    tx_header.RTR = CAN_RTR_DATA;
+    tx_header.DLC = 8;
+    tx_header.TransmitGlobalTime = DISABLE;
 }
 
+/* ----------------------------------------------------------
+ * Build and transmit a sensor frame with counter + CRC
+ *
+ * Frame layout (8 bytes):
+ *   [0]    Rolling message counter (wraps at 256)
+ *   [1]    Temperature integer part (signed °C)
+ *   [2]    Temperature fractional × 100 (0..99)
+ *   [3]    System state enum (0=NORMAL, 1=WARNING, 2=CRITICAL)
+ *   [4-6]  Reserved (0x00) — future: humidity, pressure
+ *   [7]    CRC-8 over bytes 0..6 (polynomial 0x07)
+ * ---------------------------------------------------------- */
+HAL_StatusTypeDef CAN_SendSensorFrame(float temp_c, SystemState state)
+{
+    tx_data[0] = msg_counter;
+
+    int16_t temp_int  = (int16_t)temp_c;
+    uint8_t temp_frac = (uint8_t)((temp_c - temp_int) * 100.0f);
+    tx_data[1] = (uint8_t)temp_int;
+    tx_data[2] = temp_frac;
+
+    tx_data[3] = (uint8_t)state;
+
+    tx_data[4] = 0x00;
+    tx_data[5] = 0x00;
+    tx_data[6] = 0x00;
+
+    tx_data[7] = crc8_compute(tx_data, 7);
+
+    msg_counter++;  /* uint8_t wraps naturally at 256 */
+
+    return HAL_CAN_AddTxMessage(&hcan1, &tx_header, tx_data, &tx_mailbox);
+}
+
+/* ----------------------------------------------------------
+ * RX interrupt callback (kept for completeness — Node A
+ * doesn't receive its own frames in Normal mode, but the
+ * callback must exist because HAL_CAN_ActivateNotification
+ * was called for FIFO0)
+ * ---------------------------------------------------------- */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 {
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_header, rx_data) == HAL_OK) {
         can_rx_flag = 1;
+        can_rx_count++;
     }
 }
+
 /* USER CODE END 4 */
 
 /**

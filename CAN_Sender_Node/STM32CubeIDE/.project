@@ -32,9 +32,9 @@
 	</natures>
 	<linkedResources>
 		<link>
-			<name>blink_test.ioc</name>
-			<type>1</type>
-			<locationURI>copy_PARENT/blink_test.ioc</locationURI>
+   			<name>CAN_Sender_Node.ioc</name>
+   			<type>1</type>
+    		<locationURI>copy_PARENT/CAN_Sender_Node.ioc</locationURI>
 		</link>
 		<link>
 			<name>Drivers/CMSIS/system_stm32f4xx.c</name>
@@ -164,8 +164,8 @@
 	</linkedResources>
 	<variableList>
 		<variable>
-			<name>copy_PARENT</name>
-			<value>file:/E:/Projects/Industrial%20Safety%20Monitoring%20CAN%20Network/blink_test</value>
+    		<name>copy_PARENT</name>
+    		<value>file:/E:/Projects/Industrial%20Safety%20Monitoring%20CAN%20Network/CAN_Sender_Node</value>
 		</variable>
 	</variableList>
 </projectDescription>

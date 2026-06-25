@@ -2,7 +2,7 @@
 
 A two-node CAN bus safety system built on STM32, demonstrating embedded safety patterns used in automotive and industrial control: message integrity (CRC, counters), heartbeat/watchdog monitoring, and deterministic safe-state transitions. Python-based CAN traffic logger included for analysis.
 
-**Project status:** 🚧 In progress — Week 1 of 2
+**Project status:** 🚧 In progress — Week 2 of 2
 
 ## Goals
 
@@ -22,9 +22,10 @@ A two-node CAN bus safety system built on STM32, demonstrating embedded safety p
 
 ## Repository structure
 Industrial Safety Monitoring CAN Network/
-├── blink_test/         # Day 1–2: toolchain validation, LED blink, UART printf
-├── images/             # screenshots and hardware photos, organised by day
-└── ...                 # (more sub-projects added as work progresses)
+├── CAN_Sender_Node/      # Node A — sensor node: BME280 read, state machine, CAN TX with integrity
+├── CAN_Receiver_Node/    # Node B — validator node: CAN RX, CRC + counter validation, statistics
+├── Project-Snaps/        # screenshots and hardware photos, organised by day
+└── ...                   # (Python logger and further sub-projects added as work progresses)
 
 ## Build log
 
@@ -42,7 +43,7 @@ Implemented LED blink three ways to internalise the abstraction layers:
 Covered why the BSRR pattern matters once interrupts share a GPIO port with the main loop — a foundation for the multi-LED status indicators planned for Node A.
 
 <p align="center">
-  <img src="images/day01-blink-toolchain/04-led-blink-hardware.jpeg" width="500">
+  <img src="Project-Snaps/day01-blink-toolchain/04-led-blink-hardware.jpeg" width="500">
   <br>
   <em>First firmware running on hardware — green LD2 blinking at 1 Hz on the Nucleo-F446RE.</em>
 </p>
@@ -51,19 +52,19 @@ Covered why the BSRR pattern matters once interrupts share a GPIO port with the 
 <summary>Setup screenshots</summary>
 
 <p align="center">
-  <img src="images/day01-blink-toolchain/01-cubemx-board-selector-pinout.png" width="700">
+  <img src="Project-Snaps/day01-blink-toolchain/01-cubemx-board-selector-pinout.png" width="700">
   <br>
   <em>CubeMX Board Selector pinout view — PA5 (LD2), PA2/PA3 (USART2), PC13 (B1) pre-configured.</em>
 </p>
 
 <p align="center">
-  <img src="images/day01-blink-toolchain/02-cubemx-code-generator-settings.png" width="700">
+  <img src="Project-Snaps/day01-blink-toolchain/02-cubemx-code-generator-settings.png" width="700">
   <br>
   <em>Code Generator settings — per-peripheral file split and user-code preservation enabled.</em>
 </p>
 
 <p align="center">
-  <img src="images/day01-blink-toolchain/03-cubeide-project-structure.png" width="700">
+  <img src="Project-Snaps/day01-blink-toolchain/03-cubeide-project-structure.png" width="700">
   <br>
   <em>Generated project structure in STM32CubeIDE.</em>
 </p>
@@ -84,7 +85,7 @@ Implemented an in-line `printf` profiler using `HAL_GetTick()` before and after 
 This is the first quantitative observation of how blocking I/O distorts deterministic scheduling — directly motivates the FreeRTOS-vs-bare-metal comparison planned for Project 3.
 
 <p align="center">
-  <img src="images/day02-uart-printf/03-putty-printf-profiling.png" width="700">
+  <img src="Project-Snaps/day02-uart-printf/03-putty-printf-profiling.png" width="700">
   <br>
   <em>Live UART output in PuTTY showing tick counter, system uptime, and self-measured printf duration.</em>
 </p>
@@ -93,13 +94,13 @@ This is the first quantitative observation of how blocking I/O distorts determin
 <summary>Setup and earlier iteration</summary>
 
 <p align="center">
-  <img src="images/day02-uart-printf/01-cubemx-usart2-config.png" width="700">
+  <img src="Project-Snaps/day02-uart-printf/01-cubemx-usart2-config.png" width="700">
   <br>
   <em>USART2 configuration in CubeMX: 115200 8N1, hardware flow control disabled.</em>
 </p>
 
 <p align="center">
-  <img src="images/day02-uart-printf/02-putty-tick-counter.png" width="700">
+  <img src="Project-Snaps/day02-uart-printf/02-putty-tick-counter.png" width="700">
   <br>
   <em>First working UART output — boot banner plus tick counter (before adding uptime/profiling).</em>
 </p>
@@ -118,13 +119,13 @@ Wired a BME280 temperature/humidity/pressure sensor breakout to the Nucleo's Ard
 Covered the HAL address-shifting convention (`<< 1` to make space for the read/write bit) — the most common single source of "I2C silently doesn't work" bugs in STM32 code.
 
 <p align="center">
-  <img src="images/day03-i2c-bme280/02-bme280-wiring.jpeg" width="500">
+  <img src="Project-Snaps/day03-i2c-bme280/02-bme280-wiring.jpeg" width="500">
   <br>
   <em>BME280 sensor wired to the Nucleo over I2C — VIN, GND, SCL, SDA on the Arduino-compatible header.</em>
 </p>
 
 <p align="center">
-  <img src="images/day03-i2c-bme280/03-putty-bme280-detected.png" width="700">
+  <img src="Project-Snaps/day03-i2c-bme280/03-putty-bme280-detected.png" width="700">
   <br>
   <em>Boot output: I2C scanner finds the sensor at 0x76; chip ID read at register 0xD0 returns 0x60, confirming the device is a genuine BME280.</em>
 </p>
@@ -133,7 +134,7 @@ Covered the HAL address-shifting convention (`<< 1` to make space for the read/w
 <summary>CubeMX I2C configuration</summary>
 
 <p align="center">
-  <img src="images/day03-i2c-bme280/01-cubemx-i2c1-config.png" width="700">
+  <img src="Project-Snaps/day03-i2c-bme280/01-cubemx-i2c1-config.png" width="700">
   <br>
   <em>I2C1 peripheral configured: Standard Mode, 100 kHz, 7-bit addressing. PB8/PB9 auto-routed as SCL/SDA.</em>
 </p>
@@ -153,7 +154,7 @@ Implementation steps:
 **Live readings confirm:** temperature ~28 °C (sensor self-heats ~2 °C above ambient), humidity ~65% RH, pressure ~998 hPa (consistent with Friedberg elevation). Breathing on the sensor pushes humidity above 80% within two samples, validating that real environmental coupling works.
 
 <p align="center">
-  <img src="images/day04-bme280-readings/01-putty-live-readings.png" width="700">
+  <img src="Project-Snaps/day04-bme280-readings/01-putty-live-readings.png" width="700">
   <br>
   <em>Continuous BME280 readings — temperature, humidity, and pressure printed every second over UART.</em>
 </p>
@@ -162,7 +163,7 @@ Implementation steps:
 <summary>Driver files and validation</summary>
 
 <p align="center">
-  <img src="images/day04-bme280-readings/02-bme280-C_file.png" width="700">
+  <img src="Project-Snaps/day04-bme280-readings/02-bme280-C_file.png" width="700">
   <br>
   <em>BME280 driver (<code>bme280.c</code>) showing the algorithm, with live readings in PuTTY confirming the math produces valid real-world values.</em>
 </p>
@@ -182,7 +183,7 @@ Validated experimentally: pinching the sensor between fingers heats it past 30 �
 This is the same classify → detect-edge → react pattern that Node A will use in Week 2 to decide when to emit CAN state-change events.
 
 <p align="center">
-  <img src="images/day05-state-machine/03-transition-warning-to-critical.png" width="700">
+  <img src="Project-Snaps/day05-state-machine/03-transition-warning-to-critical.png" width="700">
   <br>
   <em>WARNING → CRITICAL transition at 45.4 °C — the threshold crossing is logged with full sensor context plus a prominent state-change marker.</em>
 </p>
@@ -191,19 +192,19 @@ This is the same classify → detect-edge → react pattern that Node A will use
 <summary>Other states and transitions</summary>
 
 <p align="center">
-  <img src="images/day05-state-machine/01-normal-state-steady.png" width="700">
+  <img src="Project-Snaps/day05-state-machine/01-normal-state-steady.png" width="700">
   <br>
   <em>Steady NORMAL state at room temperature — uniform output, slow blink rate.</em>
 </p>
 
 <p align="center">
-  <img src="images/day05-state-machine/02-transition-normal-to-warning.png" width="700">
+  <img src="Project-Snaps/day05-state-machine/02-transition-normal-to-warning.png" width="700">
   <br>
   <em>NORMAL → WARNING transition triggered by finger contact heating the sensor past 30 °C.</em>
 </p>
 
 <p align="center">
-  <img src="images/day05-state-machine/04-cubeide-code-warning-state.png" width="700">
+  <img src="Project-Snaps/day05-state-machine/04-cubeide-code-warning-state.png" width="700">
   <br>
   <em>Main loop code with state-aware printf and state-derived blink interval, alongside live WARNING-state output.</em>
 </p>
@@ -228,7 +229,7 @@ Implementation: `classify_state()` gained a second argument (`current` state) an
 Validated experimentally with two clean transitions: room temperature → finger-warmed past 30 °C → flashlight-heated past 45 °C, with hysteresis holding cleanly at both boundaries (no flicker).
 
 <p align="center">
-  <img src="images/day06-refactor-hysteresis/03-transition-warning-to-critical.png" width="700">
+  <img src="Project-Snaps/day06-refactor-hysteresis/03-transition-warning-to-critical.png" width="700">
   <br>
   <em>WARNING → CRITICAL transition at 45.24 °C — sustained CRITICAL state without flapping back down through the 43 °C exit threshold.</em>
 </p>
@@ -237,13 +238,13 @@ Validated experimentally with two clean transitions: room temperature → finger
 <summary>Other transitions and module layout</summary>
 
 <p align="center">
-  <img src="images/day06-refactor-hysteresis/01-normal-steady-with-module.png" width="700">
+  <img src="Project-Snaps/day06-refactor-hysteresis/01-normal-steady-with-module.png" width="700">
   <br>
   <em>Steady NORMAL state at room temperature (~25 °C). Project Explorer (left) shows the new <code>state_machine.c</code> file alongside <code>bme280.c</code>; Outline panel (right) shows <code>state_machine.h</code> contents.</em>
 </p>
 
 <p align="center">
-  <img src="images/day06-refactor-hysteresis/02-transition-normal-to-warning.png" width="700">
+  <img src="Project-Snaps/day06-refactor-hysteresis/02-transition-normal-to-warning.png" width="700">
   <br>
   <em>NORMAL → WARNING transition at 30.48 °C, followed by sustained WARNING state with rising temperature (31.03 → 31.84 °C).</em>
 </p>
@@ -265,7 +266,7 @@ First CAN milestone. Enabled CAN1 in CubeMX and validated the full TX/RX path in
 **Result:** every transmitted frame round-trips through the peripheral and arrives intact at the RX FIFO. Counter increments monotonically, all data bytes match, "OK match" on every cycle.
 
 <p align="center">
-  <img src="images/day07-can-loopback/02-putty-loopback-frames.png" width="700">
+  <img src="Project-Snaps/day07-can-loopback/02-putty-loopback-frames.png" width="700">
   <br>
   <em>CAN loopback test: TX increments counter, the ISR callback fires for each frame, RX data matches TX exactly. Eight consecutive successful round trips.</em>
 </p>
@@ -274,13 +275,13 @@ First CAN milestone. Enabled CAN1 in CubeMX and validated the full TX/RX path in
 <summary>Code context and hardware</summary>
 
 <p align="center">
-  <img src="images/day07-can-loopback/01-loopback-success-with-code.png" width="700">
+  <img src="Project-Snaps/day07-can-loopback/01-loopback-success-with-code.png" width="700">
   <br>
   <em>CubeIDE Project Explorer shows the new <code>can.c</code> driver alongside <code>bme280.c</code>, <code>state_machine.c</code>; Outline panel shows the CAN handle types and ISR callback registration.</em>
 </p>
 
 <p align="center">
-  <img src="images/day07-can-loopback/03-hardware-setup.jpg" width="500">
+  <img src="Project-Snaps/day07-can-loopback/03-hardware-setup.jpg" width="500">
   <br>
   <em>Hardware setup at end of Day 7 — Nucleo-F446RE with BME280 sensor (I2C, four-wire ribbon at right) and SN65HVD230 CAN transceiver (blue board at bottom-left, wired to STM32 but with CANH/CANL unconnected since loopback mode bypasses the transceiver internally). The transceiver wiring is staged ahead of Day 8's two-node bus setup.</em>
 </p>
@@ -304,7 +305,7 @@ The transition from "peripheral validated" to "real network." Switched CAN1 from
 **Result:** Node A transmits a counter-payload frame with ID `0x123`, DLC 4. Node B receives every frame in sequence, no gaps, payload matches exactly. From cold boot, first transmission to first reception completes in 8 ms.
 
 <p align="center">
-  <img src="images/day08-two-board-can/01-dual-projects-with-output.png" width="900">
+  <img src="Project-Snaps/day08-two-board-can/01-dual-projects-with-output.png" width="900">
   <br>
   <em>Both projects open in the same CubeIDE workspace (<code>CAN_Sender_Node</code> and <code>CAN_Receiver_Node</code>) with their PuTTY consoles. Left console (COM4 — sender): full boot sequence, CAN init diagnostics, then continuous TX. Right console (COM6 — receiver): independent boot banner, then RX frames matching the sender's payload frame-for-frame starting at 8 ms after Node B comes online.</em>
 </p>
@@ -313,15 +314,60 @@ The transition from "peripheral validated" to "real network." Switched CAN1 from
 <summary>CubeMX configuration and close-up of the dual-console output</summary>
 
 <p align="center">
-  <img src="images/day08-two-board-can/03-cubemx-can1-normal-pinout.png" width="900">
+  <img src="Project-Snaps/day08-two-board-can/03-cubemx-can1-normal-pinout.png" width="900">
   <br>
   <em>CubeMX CAN1 configuration on Nucleo-F446RE: <strong>CAN1_TX → PA12, CAN1_RX → PA11</strong>, Operating Mode <strong>Normal</strong>, Baud Rate 500 kbit/s. Identical configuration applied to both Sender and Receiver projects ensures the two nodes agree on bit timing.</em>
 </p>
 
 <p align="center">
-  <img src="images/day08-two-board-can/02-putty-dual-tx-rx.png" width="900">
+  <img src="Project-Snaps/day08-two-board-can/02-putty-dual-tx-rx.png" width="900">
   <br>
   <em>Close-up of both PuTTY windows showing the full bring-up sequence: sender's init diagnostics (all <code>HAL_OK</code>, CAN error 0x00000000), then steady TX (left); receiver's independent boot, then sequential RX frames (right). Counter increments in lockstep on both sides.</em>
+</p>
+
+</details>
+
+### Week 2 — Application-layer integrity, heartbeat, safe state, logging
+
+#### Day 9 (2026-06-25) — Application-layer message integrity: counter, CRC-8, lost-frame detection
+
+The first Week 2 milestone moves up the stack: from "bytes arrive on the bus" (Day 8) to "the receiver can trust those bytes." A real safety network must detect both **corruption** (bit errors the CAN CRC didn't catch at the application boundary) and **loss** (frames that never arrived at all). This day implements both, end to end across the two nodes.
+
+**Frame format.** Node A's payload was redefined from the Day 8 placeholder into a structured 8-byte safety frame:
+
+| Byte | Field | Notes |
+|------|-------|-------|
+| 0 | Rolling message counter | `uint8_t`, wraps at 256 |
+| 1 | Temperature integer part | signed °C, from BME280 |
+| 2 | Temperature fractional part | 0–99 (×100) |
+| 3 | System state enum | 0 = NORMAL, 1 = WARNING, 2 = CRITICAL |
+| 4–6 | Reserved | `0x00` — room for humidity/pressure later |
+| 7 | CRC-8 | computed over bytes 0–6 |
+
+**Sender (Node A).** Each 100 ms cycle reads the BME280, classifies the temperature into a state, packs the frame, computes the CRC over bytes 0–6, writes it into byte 7, and transmits. The rolling counter increments every frame and wraps naturally at 256 — no explicit modulo needed because `uint8_t` overflow does it for free.
+
+**Receiver (Node B).** On each received frame the node:
+1. **Validates the CRC** — recomputes CRC-8 over bytes 0–6 and compares against byte 7. A mismatch increments a `crcErr` counter and the frame is rejected before its contents are trusted.
+2. **Detects lost frames** — compares the received counter against the expected next value. Any positive gap means frames went missing; the gap size is added to a `lost` counter and logged explicitly. The same `uint8_t` wrap arithmetic that drives the sender's counter also makes gap detection correct across the 255 → 0 boundary (e.g. expected 255, received 2 → gap of 3, correctly counting 255, 0, 1 as lost).
+3. **Maintains running statistics** — `recv` / `lost` / `crcErr` totals printed on every frame, giving a live integrity dashboard over UART.
+
+**CRC-8 choice.** Polynomial `0x07`, init `0x00`, no reflection, no final XOR — the CRC-8/SMBus variant used in SMBus PEC and many I2C sensors. The identical `crc8.c` / `crc8.h` implementation is compiled into **both** projects, so sender and receiver agree bit-for-bit; any divergence would surface immediately as a 100% CRC-failure rate.
+
+**Result.** With both nodes running, every frame validates: `OK`, `crcErr = 0`, and `recv` climbs 1:1 with the sender's counter. The lost-frame logic also proved itself on a real gap — when the receiver attached mid-stream and missed two in-flight frames, it logged `>>> LOST 2 frame(s) (expected 144, got 146)` and bumped `lost` by exactly 2, then resumed clean tracking. This is the COM-like validation and DEM-like fault-counting behaviour the project set out to demonstrate, in plain HAL code.
+
+<p align="center">
+  <img src="Project-Snaps/day09-integrity-crc/01-putty-dual-integrity-crc.png" width="900">
+  <br>
+  <em>Both PuTTY consoles during the integrity test. Left (COM4 — Node A): structured frames with live BME280 temperature, WARNING state, and per-frame CRC. Right (COM6 — Node B): every frame validated <code>OK</code> with <code>crcErr=0</code> and <code>recv</code> climbing in lockstep; near the top, the lost-frame detector fires on a real two-frame gap (<code>&gt;&gt;&gt; LOST 2 frame(s) (expected 144, got 146)</code>) and the <code>lost</code> counter increments accordingly.</em>
+</p>
+
+<details>
+<summary>Shared CRC implementation across both nodes</summary>
+
+<p align="center">
+  <img src="Project-Snaps/day09-integrity-crc/02-cubeide-crc8-both-nodes.png" width="900">
+  <br>
+  <em>CubeIDE workspace with both projects (<code>CAN_Receiver_Node</code> and <code>CAN_Sender_Node</code>) showing the shared <code>crc8.c</code> open — the same bit-serial CRC-8 (poly 0x07) compiled into each node. Console confirms a clean flash: download verified successfully.</em>
 </p>
 
 </details>
@@ -336,10 +382,10 @@ The transition from "peripheral validated" to "real network." Switched CAN1 from
 - Modular architecture: separation into hardware drivers (`bme280.*`), state policy (`state_machine.*`), and application orchestration (`main.c`)
 - Syscall retargeting (`_write`) to redirect `printf` to UART
 - Fixed-point compensation math: `int32_t` / `int64_t` arithmetic per Bosch datasheet specification
-- Modular architecture: separation into hardware drivers (`bme280.*`), state policy (`state_machine.*`), and application orchestration (`main.c`)
+- Unsigned integer wrap arithmetic for rolling counters and gap detection (`uint8_t` overflow as intentional modulo-256)
 
 ### STM32 / HAL
-- HAL programming — GPIO, UART, I2C; CAN coming
+- HAL programming — GPIO, UART, I2C, CAN
 - CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
 - STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation
 - `.ioc` regeneration discipline — adding peripherals mid-project (I2C on Day 3) without losing user code
@@ -353,6 +399,12 @@ The transition from "peripheral validated" to "real network." Switched CAN1 from
 - CAN bus termination: 120 Ω resistors to match characteristic impedance and prevent signal reflections
 - Bit-timing matching across nodes (Prescaler, BS1, BS2) at 500 kbit/s
 
+### Safety and integrity
+- Application-layer message integrity: CRC-8 (poly 0x07) over a structured payload, computed and validated independently of the CAN protocol's own CRC
+- Rolling message counter with receiver-side gap detection for lost/duplicate-frame identification
+- Running fault statistics (received / lost / CRC-error counts) — a live integrity dashboard, the basis for AUTOSAR DEM-style fault qualification
+- Shared integrity code compiled identically into multiple nodes to guarantee agreement
+
 ### Sensor integration
 - BME280 wiring (I2C + 3.3V power), chip ID verification pattern
 - Factory calibration data handling (compensation coefficients stored in non-volatile chip memory)
@@ -360,7 +412,6 @@ The transition from "peripheral validated" to "real network." Switched CAN1 from
 
 ### Embedded design patterns
 - State-machine design: threshold classification, edge-triggered transition detection (the foundational pattern for CAN event emission and AUTOSAR DEM-style fault logging)
-- Hysteresis: asymmetric rising/falling thresholds to prevent state flapping near boundaries (industrial controller standard practice)
 - Hysteresis: asymmetric rising/falling thresholds to prevent state flapping near boundaries (industrial controller standard practice)
 - HAL weak-symbol callbacks (`HAL_CAN_RxFifo0MsgPendingCallback`) — overriding default empty implementations to handle peripheral events
 - ISR-to-main-loop communication via `volatile` flag variables (mandatory to prevent compiler caching)
@@ -370,6 +421,7 @@ The transition from "peripheral validated" to "real network." Switched CAN1 from
 - Live UART logging during execution; timing measurement via `HAL_GetTick()`
 - Quantitative analysis of blocking I/O overhead (printf cost ≈ 2–3 ms at 115200 baud)
 - Diagnostic instrumentation via `HAL_CAN_GetError()` and register inspection (MCR/MSR) when peripheral init failed silently
+- Build-provenance verification via `__DATE__`/`__TIME__` boot banner — catching stale-flash mismatches between source and the binary actually running on the board
 - Board-specific pin discovery — verifying datasheet pinout claims against actual Nucleo header accessibility
 - Dual-PuTTY workflow for two-node embedded systems: independent ST-Link VCP enumeration (COM4 + COM6) for simultaneous TX/RX observation
 
