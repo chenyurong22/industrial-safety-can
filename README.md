@@ -372,6 +372,27 @@ The first Week 2 milestone moves up the stack: from "bytes arrive on the bus" (D
 
 </details>
 
+#### Day 10 (2026-06-26) — Heartbeat mechanism: independent liveness signal on a separate CAN ID
+
+Message integrity (Day 9) proves that *the bytes you received* are trustworthy — but it cannot tell you that the *sender itself* is still alive. If Node A's firmware hangs or its power drops, no corrupt frame arrives; nothing arrives at all. A safety network needs a positive "I'm alive" signal, independent of the data path. That's the heartbeat — and it is the foundation for Day 11's safe-state watchdog.
+
+**Two independent cadences via tick-based scheduling.** Node A's main loop was converted from a single `HAL_Delay(100)` blocking cycle to a non-blocking scheduler driven by `HAL_GetTick()`. Each frame type now fires on its own schedule, fully decoupled:
+
+- **Sensor frame** (ID `0x123`, 8 bytes) every **100 ms**
+- **Heartbeat frame** (ID `0x100`, 2 bytes: rolling counter + coarse uptime) every **200 ms**
+
+The loop free-runs and checks `now - last_sensor_tx >= 100` and `now - last_heartbeat_tx >= 200` independently. This is the correct pattern for periodic messaging — a heartbeat that shares timing with the sensor loop is conceptually wrong, because the whole point is that it proves liveness regardless of what the data path is doing. It also sets up the bare-metal-vs-FreeRTOS comparison planned for Project 3, where this hand-rolled cooperative scheduler is replaced by real preemptive tasks.
+
+**Receiver-side ID demultiplexing.** Node B's RX interrupt callback now branches on `rx_header.StdId`: heartbeat frames (`0x100`) land in a separate `hb_rx_data` buffer and raise `hb_rx_flag`; sensor frames (`0x123`) go through the existing Day 9 CRC/counter path. Copying into separate buffers inside the ISR prevents a heartbeat from clobbering a sensor frame mid-processing. The accept-all hardware filter (mask = 0) already passes both IDs to FIFO0, so no CubeMX change was needed — the demultiplexing is purely in software.
+
+**Result.** Node A emits heartbeats on a clean 200 ms grid (`[HB #0 @ 200 ms]`, `[HB #1 @ 400 ms]`, …) interleaved with 100 ms sensor frames — roughly two sensor frames per heartbeat, exactly the expected ratio. Node B receives both streams without cross-contamination: CRC-validated sensor frames (`crcErr=0`) interleaved with `<HB #n recv @ ...>` lines, the heartbeat counter climbing 1:1 with no gaps and the `uptime_lo` field advancing. Node B now stores `last_hb_tick` on every heartbeat — the timestamp Day 11's timeout watchdog watches.
+
+<p align="center">
+  <img src="Project-Snaps/day10-heartbeat/01-putty-dual-heartbeat-cadence.png" width="900">
+  <br>
+  <em>Both consoles during heartbeat operation. Left (COM4 — Node A): sensor <code>TX</code> frames interleaved with <code>[HB #n @ ...ms]</code> on a clean 200 ms cadence. Right (COM6 — Node B): CRC-validated sensor <code>RX</code> lines interleaved with <code>&lt;HB #n recv @ ...&gt;</code> heartbeat lines; the heartbeat counter and <code>uptime_lo</code> field both climb cleanly, confirming the StdId demultiplexing works and the two cadences stay independent.</em>
+</p>
+
 ## Skills demonstrated
 
 *(this section grows as work progresses)*
@@ -389,6 +410,7 @@ The first Week 2 milestone moves up the stack: from "bytes arrive on the bus" (D
 - CMSIS register-level access (`BSRR`, `ODR`) — atomic vs read-modify-write
 - STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation
 - `.ioc` regeneration discipline — adding peripherals mid-project (I2C on Day 3) without losing user code
+- Non-blocking cooperative scheduling via `HAL_GetTick()` — replacing blocking `HAL_Delay()` to run independent periodic tasks at different rates
 
 ### Communication protocols
 - I2C bus: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
@@ -398,12 +420,15 @@ The first Week 2 milestone moves up the stack: from "bytes arrive on the bus" (D
 - CAN Normal mode operation: differential signaling over CANH/CANL, ACK-based frame validation, multi-node bus
 - CAN bus termination: 120 Ω resistors to match characteristic impedance and prevent signal reflections
 - Bit-timing matching across nodes (Prescaler, BS1, BS2) at 500 kbit/s
+- Multi-ID CAN messaging: separate message IDs for data (0x123) and liveness/heartbeat (0x100) on one bus
+- Receiver-side ID demultiplexing — branching on StdId in the RX ISR to route frames into separate buffers
 
 ### Safety and integrity
 - Application-layer message integrity: CRC-8 (poly 0x07) over a structured payload, computed and validated independently of the CAN protocol's own CRC
 - Rolling message counter with receiver-side gap detection for lost/duplicate-frame identification
 - Running fault statistics (received / lost / CRC-error counts) — a live integrity dashboard, the basis for AUTOSAR DEM-style fault qualification
 - Shared integrity code compiled identically into multiple nodes to guarantee agreement
+- Heartbeat / liveness signalling — independent periodic "I'm alive" message decoupled from the data path, the basis for watchdog supervision
 
 ### Sensor integration
 - BME280 wiring (I2C + 3.3V power), chip ID verification pattern

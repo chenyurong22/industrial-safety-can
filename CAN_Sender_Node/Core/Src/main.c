@@ -65,6 +65,15 @@ volatile uint8_t can_rx_count = 0;
 
 static uint8_t msg_counter = 0;  /* wraps at 256 */
 
+/* Heartbeat — separate CAN ID, independent cadence */
+CAN_TxHeaderTypeDef hb_header;
+uint8_t hb_data[8] = {0};
+static uint8_t hb_counter = 0;
+
+/* Tick-based scheduling timestamps */
+static uint32_t last_sensor_tx = 0;
+static uint32_t last_heartbeat_tx = 0;
+
 
 /* USER CODE END PV */
 
@@ -75,6 +84,7 @@ void SystemClock_Config(void);
 int _write(int file, char *ptr, int len);
 void CAN_TestInit(void);
 HAL_StatusTypeDef CAN_SendSensorFrame(float temp_c, SystemState state);
+HAL_StatusTypeDef CAN_SendHeartbeat(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -135,29 +145,44 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
+	  /* USER CODE END WHILE */
+	        /* USER CODE BEGIN 3 */
+	        uint32_t now = HAL_GetTick();
 
-	  /* USER CODE BEGIN 3 */
-	        float temp_c, hum_pct, press_hpa;
-	        if (BME280_Read(&temp_c, &hum_pct, &press_hpa) == HAL_OK) {
-	            current_state = classify_state(temp_c, current_state);
-	            if (current_state != previous_state) {
-	                printf("*** STATE: %s -> %s ***\r\n",
-	                       state_name(previous_state), state_name(current_state));
-	                previous_state = current_state;
+	        /* Sensor frame every 100 ms */
+	        if (now - last_sensor_tx >= 100)
+	        {
+	            last_sensor_tx = now;
+
+	            float temp_c, hum_pct, press_hpa;
+	            if (BME280_Read(&temp_c, &hum_pct, &press_hpa) == HAL_OK) {
+	                current_state = classify_state(temp_c, current_state);
+	                if (current_state != previous_state) {
+	                    printf("*** STATE: %s -> %s ***\r\n",
+	                           state_name(previous_state), state_name(current_state));
+	                    previous_state = current_state;
+	                }
+
+	                if (CAN_SendSensorFrame(temp_c, current_state) == HAL_OK) {
+	                    printf("TX #%u: T=%.2f C state=%s  CRC=0x%02X\r\n",
+	                           (uint8_t)(msg_counter - 1),
+	                           temp_c, state_name(current_state), tx_data[7]);
+	                } else {
+	                    printf("TX failed (CAN error: 0x%08lX)\r\n", HAL_CAN_GetError(&hcan1));
+	                }
 	            }
 
-	            if (CAN_SendSensorFrame(temp_c, current_state) == HAL_OK) {
-	                printf("TX #%u: T=%.2f°C state=%s  CRC=0x%02X\r\n",
-	                       (uint8_t)(msg_counter - 1),
-	                       temp_c, state_name(current_state), tx_data[7]);
-	            } else {
-	                printf("TX failed (CAN error: 0x%08lX)\r\n", HAL_CAN_GetError(&hcan1));
-	            }
+	            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 	        }
 
-	        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-	        HAL_Delay(100);  /* 10 Hz */
+	        /* Heartbeat every 200 ms, independent of sensor cadence */
+	        if (now - last_heartbeat_tx >= 200)
+	        {
+	            last_heartbeat_tx = now;
+	            if (CAN_SendHeartbeat() == HAL_OK) {
+	                printf("  [HB #%u @ %lu ms]\r\n", (uint8_t)(hb_counter - 1), now);
+	            }
+	        }
 	    }
 	    /* USER CODE END 3 */
 }
@@ -249,6 +274,14 @@ void CAN_TestInit(void)
     tx_header.RTR = CAN_RTR_DATA;
     tx_header.DLC = 8;
     tx_header.TransmitGlobalTime = DISABLE;
+
+    /* Heartbeat header — ID 0x100, DLC 2 (counter + uptime low byte) */
+        hb_header.StdId = 0x100;
+        hb_header.ExtId = 0;
+        hb_header.IDE = CAN_ID_STD;
+        hb_header.RTR = CAN_RTR_DATA;
+        hb_header.DLC = 2;
+        hb_header.TransmitGlobalTime = DISABLE;
 }
 
 /* ----------------------------------------------------------
@@ -283,6 +316,16 @@ HAL_StatusTypeDef CAN_SendSensorFrame(float temp_c, SystemState state)
 
     return HAL_CAN_AddTxMessage(&hcan1, &tx_header, tx_data, &tx_mailbox);
 }
+
+    HAL_StatusTypeDef CAN_SendHeartbeat(void)
+    {
+        uint32_t tick = HAL_GetTick();
+        hb_data[0] = hb_counter++;            /* rolling heartbeat counter */
+        hb_data[1] = (uint8_t)(tick / 100);   /* coarse uptime low byte */
+
+        uint32_t mailbox;
+        return HAL_CAN_AddTxMessage(&hcan1, &hb_header, hb_data, &mailbox);
+    }
 
 /* ----------------------------------------------------------
  * RX interrupt callback (kept for completeness — Node A
