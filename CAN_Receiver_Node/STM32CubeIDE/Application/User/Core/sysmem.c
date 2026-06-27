@@ -73,7 +73,7 @@ void *_sbrk(ptrdiff_t incr)
   }
 
   prev_heap_end = __sbrk_heap_end;
-  __sbrk_heap_end += incr;
+   __sbrk_heap_end += incr;
 
   return (void *)prev_heap_end;
 }

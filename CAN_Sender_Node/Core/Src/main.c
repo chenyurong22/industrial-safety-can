@@ -126,7 +126,6 @@ int main(void)
   MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
   printf("\r\n=== CAN_Sender_Node booted ===\r\n");
-    printf("Build: %s %s\r\n", __DATE__, __TIME__);
 
     if (BME280_Init() == HAL_OK) {
         printf("BME280 calibrated and configured.\r\n\r\n");

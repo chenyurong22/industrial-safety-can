@@ -14,7 +14,6 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "crc8.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,13 +57,22 @@ uint32_t hb_count = 0;
 uint32_t last_hb_tick = 0;
 
 /* Servo PWM pulse widths (µs) — TIM3_CH1 CCR maps 1:1 to microseconds */
+#define SERVO_HOME      1000   /* 0°   — boot reference/home position */
 #define SERVO_NORMAL    1167   /* 30°  */
 #define SERVO_WARNING   1333   /* 60°  */
 #define SERVO_CRITICAL  1500   /* 90°  */
 #define SERVO_SAFE      2000   /* 180° — fail-safe full-open */
 
+/* Rate-limited movement: step size and delay bound inrush current so the
+   SG90 can run off the Nucleo 5V rail without browning out the board. */
+#define SERVO_STEP_US      20   /* µs of pulse change per step  */
+#define SERVO_STEP_DELAY    5   /* ms between steps             */
+
+static uint16_t servo_current_us = SERVO_HOME;  /* tracks last commanded position */
+
 /* Safe-state / watchdog tracking */
 #define HEARTBEAT_TIMEOUT_MS  500
+#define WATCHDOG_GRACE_MS     1000   /* no safe-state entry during first second after boot */
 static uint8_t  in_safe_state = 0;
 uint32_t watchdog_trips = 0;
 static uint32_t last_safe_blink = 0;
@@ -79,7 +87,8 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 int _write(int file, char *ptr, int len);
 void CAN_ReceiverInit(void);
-void servo_set(uint16_t pulse_us);
+void servo_write(uint16_t pulse_us);
+void servo_move_to(uint16_t target_us);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -120,13 +129,17 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   printf("\r\n=== CAN_Receiver_Node (Node B) booted ===\r\n");
-  printf("Build: %s %s\r\n", __DATE__, __TIME__);
 
   CAN_ReceiverInit();
 
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-  servo_set(SERVO_NORMAL);   /* park servo at normal position on boot */
-  printf("Servo PWM started on TIM3_CH1 (PC6).\r\n");
+
+  /* Home the servo to 0° as a known reference position, then move to NORMAL.
+     Both moves are rate-limited to avoid browning out the Nucleo 5V rail. */
+  servo_write(SERVO_HOME);          /* snap internal state to home  */
+  HAL_Delay(400);                   /* let it settle visibly at 0°  */
+  servo_move_to(SERVO_NORMAL);      /* gradual move to 30°          */
+  printf("Servo homed to 0 deg, moved to NORMAL (30 deg) on TIM3_CH1 (PC6).\r\n");
 
   /* Seed the heartbeat timestamp so we don't trip safe state before the first beat */
   last_hb_tick = HAL_GetTick();
@@ -197,15 +210,16 @@ int main(void)
       uint32_t now = HAL_GetTick();
       uint32_t since_hb = now - last_hb_tick;
 
-      if (since_hb > HEARTBEAT_TIMEOUT_MS)
+      /* Grace period: no safe-state entry during the first second after boot. */
+      if (now > WATCHDOG_GRACE_MS && since_hb > HEARTBEAT_TIMEOUT_MS)
       {
           if (!in_safe_state)
           {
               in_safe_state = 1;
               watchdog_trips++;
-              servo_set(SERVO_SAFE);
               printf("\r\n*** SAFE STATE: heartbeat timeout (%lu ms) — servo->SAFE, trips=%lu ***\r\n",
                      since_hb, watchdog_trips);
+              servo_move_to(SERVO_SAFE);   /* gradual move to 180° fail-safe */
           }
 
           if (now - last_safe_blink >= 100)
@@ -224,10 +238,10 @@ int main(void)
 
           switch (rx_data[3])
           {
-              case 0:  servo_set(SERVO_NORMAL);   break;
-              case 1:  servo_set(SERVO_WARNING);  break;
-              case 2:  servo_set(SERVO_CRITICAL); break;
-              default: servo_set(SERVO_NORMAL);   break;
+              case 0:  servo_move_to(SERVO_NORMAL);   break;
+              case 1:  servo_move_to(SERVO_WARNING);  break;
+              case 2:  servo_move_to(SERVO_CRITICAL); break;
+              default: servo_move_to(SERVO_NORMAL);   break;
           }
       }
 
@@ -486,9 +500,33 @@ void CAN_ReceiverInit(void)
         CAN_IT_RX_FIFO0_MSG_PENDING);
 }
 
-void servo_set(uint16_t pulse_us)
+/* Immediate (un-ramped) write — also syncs the tracked position. */
+void servo_write(uint16_t pulse_us)
 {
     __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pulse_us);
+    servo_current_us = pulse_us;
+}
+
+/* Rate-limited move: step gradually from the current position to the target,
+   bounding inrush current so the SG90 runs off the Nucleo 5V rail without
+   browning out the board. No-op if already at the target. */
+void servo_move_to(uint16_t target_us)
+{
+    while (servo_current_us != target_us)
+    {
+        if (target_us > servo_current_us)
+        {
+            servo_current_us = (target_us - servo_current_us > SERVO_STEP_US)
+                               ? servo_current_us + SERVO_STEP_US : target_us;
+        }
+        else
+        {
+            servo_current_us = (servo_current_us - target_us > SERVO_STEP_US)
+                               ? servo_current_us - SERVO_STEP_US : target_us;
+        }
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, servo_current_us);
+        HAL_Delay(SERVO_STEP_DELAY);
+    }
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)

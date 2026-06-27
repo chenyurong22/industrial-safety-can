@@ -393,6 +393,52 @@ The loop free-runs and checks `now - last_sensor_tx >= 100` and `now - last_hear
   <em>Both consoles during heartbeat operation. Left (COM4 — Node A): sensor <code>TX</code> frames interleaved with <code>[HB #n @ ...ms]</code> on a clean 200 ms cadence. Right (COM6 — Node B): CRC-validated sensor <code>RX</code> lines interleaved with <code>&lt;HB #n recv @ ...&gt;</code> heartbeat lines; the heartbeat counter and <code>uptime_lo</code> field both climb cleanly, confirming the StdId demultiplexing works and the two cadences stay independent.</em>
 </p>
 
+#### Day 11 (2026-06-27) — Safe-state watchdog: heartbeat-timeout supervision and fail-safe actuation
+
+Day 10 gave Node B a positive liveness signal; Day 11 makes it *act* on the absence of one. This is the core of the whole project — the transition from "a network that reports faults" to "a network that contains them." A real safety system must detect that the sender has gone silent and drive its outputs to a defined fail-safe condition within a bounded time, without human intervention. This day implements that supervision loop end to end: timeout detection, edge-triggered safe-state entry, fail-safe actuation, and automatic recovery.
+
+**Heartbeat-timeout watchdog.** Node B continuously compares `HAL_GetTick() - last_hb_tick` against a 500 ms threshold. As long as heartbeats keep arriving (every 200 ms in normal operation), the elapsed time stays well under the limit. If the sender hangs, loses power, or the bus is severed, heartbeats stop, the elapsed time crosses 500 ms, and the watchdog trips. The 500 ms window is deliberately ~2.5× the 200 ms heartbeat period — long enough to tolerate a single missed or jittered beat, short enough to react promptly. In practice the trip fires at ~501–502 ms, the small overshoot being the main-loop granularity.
+
+**Edge-triggered safe state.** Entry is guarded by an `in_safe_state` flag so the transition logic runs exactly once per fault, not every loop iteration. On the entry edge Node B drives the servo to its fail-safe position (simulating a cooling valve forced open), increments a `watchdog_trips` counter, and begins fast-blinking LD2 as a visible fault indicator. On recovery — the first heartbeat to arrive after the bus is restored — it prints a one-shot `RECOVERED` message and resumes normal state-tracking actuation. This edge-triggered structure is the same pattern AUTOSAR's WdgM uses for supervised-entity state transitions.
+
+**Fail-safe actuation via PWM servo.** The servo is driven by `TIM3_CH1` on `PC6`, configured for 50 Hz (20 ms period) with the timer ticking at 1 µs (`PSC = 84-1`, `ARR = 20000-1`), so the compare register maps 1:1 to the servo's pulse width in microseconds. Operating states map to distinct angles — NORMAL ≈ 30°, WARNING ≈ 60°, CRITICAL ≈ 90° — and the fail-safe position is a separate, distinct angle so "safe" is never confused with a normal operating point. On boot the servo first homes to a 0° reference position and then ramps to NORMAL, establishing a known startup state.
+
+**Startup grace period.** A freshly-booted Node B seeds `last_hb_tick` and suppresses safe-state entry for the first second (`WATCHDOG_GRACE_MS`), so the watchdog can't trip before the sender's first heartbeat has had a chance to arrive. This prevents a spurious safe-state entry at power-on.
+
+**Result.** With both nodes running, disconnecting Node A produces the full supervised-fault cycle in one capture: heartbeats stop, the watchdog trips at **502 ms** (`*** SAFE STATE: heartbeat timeout (502 ms) — servo->SAFE, trips=1 ***`), the servo drives to fail-safe, and LD2 fast-blinks. When the bus is restored, the next heartbeat triggers `*** RECOVERED ***` and normal operation resumes. The counter-gap logic from Day 9 runs alongside the watchdog and independently reports the frames missed during the outage (`>>> LOST 19 frame(s)`), giving two complementary views of the same fault — the heartbeat watchdog for **liveness** and the rolling counter for **frame accounting**. Throughout the cycle the board stays alive and recovers cleanly.
+
+<p align="center">
+  <img src="Project-Snaps/day11-safe-state/01-putty-safe-state-recovery-cycle.png" width="900">
+  <br>
+  <em>The complete supervised-fault cycle (COM6 — Node B). The heartbeat-timeout watchdog trips at 502 ms and drives the servo to its fail-safe position (<code>SAFE STATE … trips=1</code>); when the bus is restored the next heartbeat triggers <code>RECOVERED</code> and normal operation resumes. The Day 9 counter-gap detector runs alongside and independently reports the frames lost during the outage (<code>LOST 1</code>, then <code>LOST 19</code>) — liveness supervision and frame accounting working together.</em>
+</p>
+
+<p align="center">
+  <img src="Project-Snaps/day11-safe-state/02-putty-boot-servo-home.png" width="900">
+  <br>
+  <em>Clean boot and startup sequence (COM6 — Node B). The build-provenance banner (<code>Build: Jun 27 2026 …</code>) confirms the running binary matches the current source, and <code>Servo homed to 0 deg, moved to NORMAL (30 deg) on TIM3_CH1 (PC6)</code> shows the boot homing behaviour before steady operation begins (<code>lost=0</code>, heartbeats on cadence).</em>
+</p>
+
+<p align="center">
+  <img src="Project-Snaps/day11-safe-state/03-hardware-two-node-bus.png" width="900">
+  <br>
+  <em>The two-node safety network on the bench: both Nucleo-F446RE boards, the two SN65HVD230 transceivers and 120 Ω termination on the breadboard, the BME280 sensor, and the SG90 servo acting as the fail-safe actuator.</em>
+</p>
+
+<details>
+<summary><strong>Servo PWM configuration (CubeMX — TIM3_CH1 on PC6)</strong></summary>
+
+<p align="center">
+  <img src="Project-Snaps/day11-safe-state/04-cubemx-tim3-pwm-servo.png" width="900">
+  <br>
+  <em>TIM3 configured for PWM generation on Channel 1, routed to <code>PC6</code>. Prescaler <code>84-1</code> gives a 1 µs timer tick from the 84 MHz APB1 timer clock; counter period <code>20000-1</code> yields a 20 ms (50 Hz) frame — standard hobby-servo timing — so the compare register equals the pulse width in microseconds.</em>
+</p>
+
+</details>
+
+> **Hardware note — actuator power.** The SG90 is powered from the Nucleo's USB-fed 5 V rail, which cannot source the servo's stall current through its full travel: large moves brown out the MCU and reset the board. Two measures keep the demonstration stable on this shared supply — servo movements are **rate-limited** (the target is approached in small stepped increments rather than a single commanded swing, bounding inrush current), and the fail-safe angle is **capped** at the largest position the rail can drive reliably. The PWM commands the full range correctly; the servo simply stalls partway under the sagging rail. In a production design the actuator would run from a **dedicated 5 V supply with a common ground** to the controller — the standard practice for isolating an inductive load's current transients from the MCU. This is the engineering reason actuator power is separated from controller power, demonstrated here as a real constraint rather than hidden.
+
+
 ## Skills demonstrated
 
 *(this section grows as work progresses)*
@@ -411,6 +457,8 @@ The loop free-runs and checks `now - last_sensor_tx >= 100` and `now - last_hear
 - STM32CubeMX → STM32CubeIDE workflow with peripheral-per-file code generation
 - `.ioc` regeneration discipline — adding peripherals mid-project (I2C on Day 3) without losing user code
 - Non-blocking cooperative scheduling via `HAL_GetTick()` — replacing blocking `HAL_Delay()` to run independent periodic tasks at different rates
+- Timer PWM generation: `TIM3_CH1` at 50 Hz with a 1 µs tick (`PSC`/`ARR` chosen so the compare register maps directly to pulse width in µs)
+
 
 ### Communication protocols
 - I2C bus: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
@@ -429,11 +477,18 @@ The loop free-runs and checks `now - last_sensor_tx >= 100` and `now - last_hear
 - Running fault statistics (received / lost / CRC-error counts) — a live integrity dashboard, the basis for AUTOSAR DEM-style fault qualification
 - Shared integrity code compiled identically into multiple nodes to guarantee agreement
 - Heartbeat / liveness signalling — independent periodic "I'm alive" message decoupled from the data path, the basis for watchdog supervision
+- Heartbeat-timeout watchdog: bounded-time detection of sender silence (500 ms threshold ≈ 2.5× the heartbeat period) — AUTOSAR WdgM-style alive supervision
+- Edge-triggered safe-state entry with a trip counter and visible fault indication, plus automatic recovery on heartbeat restoration
+- Fail-safe actuator design: a distinct, defined safe position separate from all normal operating angles
+- Startup grace period to suppress spurious safe-state entry before the first heartbeat arrives
+- Complementary fault detection: heartbeat watchdog (liveness) and rolling-counter gaps (frame accounting) catching the same fault from two angles
 
 ### Sensor integration
 - BME280 wiring (I2C + 3.3V power), chip ID verification pattern
 - Factory calibration data handling (compensation coefficients stored in non-volatile chip memory)
 - Float-formatted `printf` output via `-u _printf_float` linker flag
+- PWM actuator control with rate-limited movement to bound inrush current on a shared power rail
+- Power-integrity awareness: diagnosing servo-induced brown-out (rail sag → MCU reset) and mitigating via rate limiting and load-appropriate set-points; recognising dedicated actuator supply + common ground as the production fix
 
 ### Embedded design patterns
 - State-machine design: threshold classification, edge-triggered transition detection (the foundational pattern for CAN event emission and AUTOSAR DEM-style fault logging)
