@@ -438,6 +438,52 @@ Day 10 gave Node B a positive liveness signal; Day 11 makes it *act* on the abse
 
 > **Hardware note — actuator power.** The SG90 is powered from the Nucleo's USB-fed 5 V rail, which cannot source the servo's stall current through its full travel: large moves brown out the MCU and reset the board. Two measures keep the demonstration stable on this shared supply — servo movements are **rate-limited** (the target is approached in small stepped increments rather than a single commanded swing, bounding inrush current), and the fail-safe angle is **capped** at the largest position the rail can drive reliably. The PWM commands the full range correctly; the servo simply stalls partway under the sagging rail. In a production design the actuator would run from a **dedicated 5 V supply with a common ground** to the controller — the standard practice for isolating an inductive load's current transients from the MCU. This is the engineering reason actuator power is separated from controller power, demonstrated here as a real constraint rather than hidden.
 
+#### Day 12 (2026-06-27) — Fault injection on real hardware: logic-analyzer bus capture and the three-layer evidence chain
+
+The watchdog of Day 11 was validated by disconnecting the bus and reading the result on a console. Day 12 instruments the fault at the **physical layer** — capturing the actual CAN bitstream on the wire with a logic analyzer — so the fault and the firmware's reaction to it can be observed simultaneously across three independent layers of the system. This is the difference between *claiming* the safety mechanism works and *showing* the full causal chain from a severed wire to a safe output.
+
+**Probing the logic-level CAN signal.** A standard 8-channel logic analyzer cannot read `CAN_H`/`CAN_L` directly — those are differential analog lines. Instead the analyzer's `D0` channel is clipped to the **TXD pin of Node A's SN65HVD230 transceiver** (the logic-level side, electrically the same signal as the STM32's `CAN1_TX`/`PA12`), with a common ground reference. This is the clean 0/3.3 V digital bitstream that the protocol decoder can turn into frames. Capture runs in PulseView (sigrok) at 1 MHz — 2× oversampling on the 500 kbit/s bus, the highest rate the analyzer sustains reliably — with the built-in CAN decoder set to a 500000 nominal bitrate.
+
+**Bit-accurate frame decode.** With the probe in place the decoder reconstructs every field of the live traffic: start-of-frame, identifier `0x123`, DLC 8, all eight data bytes, the CAN protocol's own CRC-15, ACK slot, and end-of-frame. Crucially the decoded data bytes match the firmware's frame format exactly — the rolling counter, the temperature integer/fraction, the state enum, and the application-layer CRC-8 in byte 7 — independently confirming the entire transmit path at the bit level.
+
+**The fault and its three-layer evidence.** Pulling the CAN bus wire mid-stream severs the network, and the consequence appears at three layers at once:
+
+1. **Physical (logic analyzer).** The decoded frame stream stops dead — `D0` goes idle and the CAN decoder produces no further valid frames. The capture shows steady framing on the left, then silence at the disconnect. This is the *cause*, visible on the wire.
+2. **Transmitter (Node A, COM4).** Node A's transmissions immediately begin failing with `TX failed (CAN error: 0x00200000)` — `HAL_CAN_ERROR_NACK`. With the bus broken, no node can acknowledge, so every frame NACKs. This is the fault propagating up to the sender.
+3. **Application (Node B, COM6).** ~500 ms later the heartbeat-timeout watchdog fires — `*** SAFE STATE: heartbeat timeout (501 ms) — servo->SAFE, trips=3 ***` — and Node B drives the servo to its fail-safe position. This is the fault *detected and contained*.
+
+**A note on the two detection mechanisms.** During total bus loss the counter-gap detector freezes (`lost` stops advancing) because gap detection needs *incoming* frames to measure gaps against — with the sender fully silent, there are none. The fault is instead caught by the heartbeat watchdog, which detects *absence*. This is exactly why the two mechanisms are complementary: counter gaps catch **partial** loss (some frames missing from an otherwise live stream), the heartbeat watchdog catches **total** loss (the stream stopping entirely). Neither alone is sufficient; together they cover the full fault space.
+
+<p align="center">
+  <img src="Project-Snaps/day12-fault-injection/01-pulseview-can-decode.png" width="900">
+  <br>
+  <em>PulseView decoding the live CAN bitstream on <code>D0</code> (Node A transceiver TXD). The CAN decoder reconstructs the full frame: <code>Identifier: 291 (0x123)</code>, <code>DLC: 8</code>, all eight data bytes, the protocol-level <code>CRC-15</code>, and <code>End of frame</code>. The decoded data bytes match the firmware's frame format exactly — verifying the transmit path at the bit level.</em>
+</p>
+
+<p align="center">
+  <img src="Project-Snaps/day12-fault-injection/02-pulseview-bus-silence.png" width="900">
+  <br>
+  <em>The fault at the physical layer: steady decoded frames on the left, then the bus goes silent at the moment the wire is pulled. The decoder can no longer form valid frames — the bitstream simply stops. This is the <em>cause</em> of the fault, captured on the wire.</em>
+</p>
+
+<p align="center">
+  <img src="Project-Snaps/day12-fault-injection/03-fault-injection-safe-state.png" width="900">
+  <br>
+  <em>The fault at the transmitter and application layers, simultaneously. Left (COM4 — Node A): transmissions fail with <code>CAN error: 0x00200000</code> (NACK) the instant the bus is severed — nothing can acknowledge. Right (COM6 — Node B): the heartbeat watchdog fires <code>*** SAFE STATE: heartbeat timeout (501 ms) — servo-&gt;SAFE ***</code> and drives the servo to fail-safe. Cause, propagation, and containment in one capture.</em>
+</p>
+
+<details>
+<summary><strong>Fault-injection hardware setup (logic analyzer tapping the bus)</strong></summary>
+
+<p align="center">
+  <img src="Project-Snaps/day12-fault-injection/04-hardware-full-setup-with-analyzer.png" width="900">
+  <br>
+  <em>The full bench during fault injection: both Nucleo-F446RE nodes, the two SN65HVD230 transceivers with 120 Ω termination, the BME280 and SG90 servo, and the 8-channel logic analyzer (bottom) with its probe clipped to Node A's transceiver TXD line and a common ground, USB-connected to the PulseView host.</em>
+</p>
+
+</details>
+
+
 
 ## Skills demonstrated
 
@@ -470,6 +516,7 @@ Day 10 gave Node B a positive liveness signal; Day 11 makes it *act* on the abse
 - Bit-timing matching across nodes (Prescaler, BS1, BS2) at 500 kbit/s
 - Multi-ID CAN messaging: separate message IDs for data (0x123) and liveness/heartbeat (0x100) on one bus
 - Receiver-side ID demultiplexing — branching on StdId in the RX ISR to route frames into separate buffers
+- Protocol decoding from raw signals: reconstructing CAN frames (ID, DLC, data, CRC-15, ACK, EOF) from a captured logic-level bitstream with a software decoder
 
 ### Safety and integrity
 - Application-layer message integrity: CRC-8 (poly 0x07) over a structured payload, computed and validated independently of the CAN protocol's own CRC
@@ -504,6 +551,10 @@ Day 10 gave Node B a positive liveness signal; Day 11 makes it *act* on the abse
 - Build-provenance verification via `__DATE__`/`__TIME__` boot banner — catching stale-flash mismatches between source and the binary actually running on the board
 - Board-specific pin discovery — verifying datasheet pinout claims against actual Nucleo header accessibility
 - Dual-PuTTY workflow for two-node embedded systems: independent ST-Link VCP enumeration (COM4 + COM6) for simultaneous TX/RX observation
+- Logic-analyzer capture (PulseView/sigrok): probe setup, sample-rate selection for a given bit rate, protocol-decoder configuration (CAN at 500 kbit/s)
+- Physical-layer debugging: probing the transceiver's logic-level TXD line (not the differential CAN_H/CAN_L) to obtain a decodable digital signal
+- Hardware fault-injection testing: deliberately severing the bus mid-stream and capturing the consequence across physical, transmitter, and application layers simultaneously
+- Multi-layer evidence correlation: lining up a logic-analyzer trace, transmitter NACK errors, and application-level safe-state entry to prove a complete fault-to-containment chain
 
 ## Author
 
