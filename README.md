@@ -4,14 +4,9 @@ A two-node CAN bus safety system built on STM32, demonstrating embedded safety p
 
 ## Demo
 
-<!-- Drop a 30–60 s screen recording named demo.gif into Project-Snaps/ and this will render.
-     Suggested sequence: temperature rising through state changes → CAN frames on both consoles
-     → servo moving → bus disconnect → watchdog safe-state → reconnect → recovery. -->
-<p align="center">
-  <img src="Project-Snaps/demo.gif" width="900">
-  <br>
-  <em>End-to-end demonstration: temperature-driven state changes, live CAN traffic, servo actuation, a heartbeat-timeout safe-state trip on bus disconnect, and automatic recovery.</em>
-</p>
+https://github.com/user-attachments/assets/6b3a358f-29fb-43ed-8647-16d2829241f6
+
+*End-to-end demonstration: temperature-driven state changes, live CAN traffic on both consoles, servo actuation, a heartbeat-timeout safe-state trip on bus disconnect, and automatic recovery.*
 
 ## Kurzbeschreibung (Deutsch)
 
@@ -25,6 +20,7 @@ Dieses Projekt ist ein sicherheitsgerichtetes CAN-Bus-Netzwerk aus zwei STM32-Kn
 - [CAN frame reference](#can-frame-reference)
 - [Hardware](#hardware)
 - [Requirements & traceability](#requirements--traceability)
+- [Static analysis](#static-analysis)
 - [Architecture](#architecture)
 - [Repository structure](#repository-structure)
 - [Build log](#build-log)
@@ -72,7 +68,7 @@ Bus: 500 kbit/s, 120 Ω termination at each end, 75 % sample point.
 
 ## Requirements & traceability
 
-This project was built against an explicit requirements specification ([`REQUIREMENTS.md`](REQUIREMENTS.md)) — 22 requirements across functional, integrity, and safety categories, each with a rationale and a verification method (test / analysis / inspection) tied to the evidence in the build log below. Requirement IDs are referenced from commit messages to give lightweight V-model traceability from requirement → implementation → demonstrated result.
+This project was built against an explicit requirements specification ([`docs/requirements.md`](docs/requirements.md)) — 22 requirements across functional, integrity, and safety categories, each with a rationale and a verification method (test / analysis / inspection) tied to the evidence in the build log below. Requirement IDs are referenced from commit messages to give lightweight V-model traceability from requirement → implementation → demonstrated result.
 
 | Category | IDs | Covers |
 |----------|-----|--------|
@@ -80,19 +76,34 @@ This project was built against an explicit requirements specification ([`REQUIRE
 | Integrity | REQ-I-01 … I-06 | Application-layer CRC-8, rolling counter, lost-frame detection, running statistics, independent PC cross-check |
 | Safety | REQ-S-01 … S-08 | Heartbeat liveness, 500 ms watchdog, edge-triggered safe state, fail-safe actuation, auto-recovery, startup grace, rate-limited actuation |
 
-Key safety requirement — **REQ-S-02:** *Node B shall detect the absence of heartbeats within 500 ms.* Verified at ~501 ms across the Day 11 and Day 12 fault-injection captures.
+A one-page hazard analysis ([`docs/hara.md`](docs/hara.md)) derives these safety requirements from six identified hazards using an ISO 26262-style Severity / Exposure / Controllability classification.
 
-A one-page hazard analysis ([`HARA.md`](HARA.md)) derives these safety requirements from six identified hazards using an ISO 26262-style Severity / Exposure / Controllability classification.
+### Verification matrix
 
-**Representative verification results** (one per category; full per-requirement verification in [`REQUIREMENTS.md`](REQUIREMENTS.md)):
+A one-glance view that requirements were actually verified against evidence in the build log. The full per-requirement verification (all 22) is in [`docs/requirements.md`](docs/requirements.md).
 
-| Requirement | Verification method | Result |
-|-------------|---------------------|--------|
-| REQ-F-04 — sensor frame every 100 ms | Decoded on the bus (logic analyzer + Python logger) | ✅ ~100 ms cadence confirmed |
-| REQ-I-02 — reject frames failing CRC-8 | CRC recomputed on Node B and independently in Python | ✅ `crcErr = 0`, cross-checked |
-| REQ-I-04 — detect lost frames | Real mid-stream gap during fault injection | ✅ gap counted correctly (Day 9/11/13) |
-| REQ-S-02 — heartbeat timeout within 500 ms | Bus severed, trip time measured | ✅ trips at ~501–502 ms (Day 11/12) |
-| REQ-S-06 — auto-recovery on heartbeat return | Bus restored after fault | ✅ one-shot `RECOVERED`, normal resumes |
+| Requirement | What it verifies | Evidence | Status |
+|-------------|------------------|----------|--------|
+| REQ-F-04 | Sensor frame every 100 ms | Day 9 / Day 13 | ✅ |
+| REQ-I-02 | Reject frames failing CRC-8 | Day 9 | ✅ |
+| REQ-I-04 | Detect lost frames (counter gap) | Day 9 / Day 11 | ✅ |
+| REQ-S-02 | Heartbeat timeout within 500 ms | Day 11 / Day 12 (~501 ms) | ✅ |
+| REQ-S-04 | Fail-safe servo position on trip | Day 11 | ✅ |
+| REQ-S-06 | Auto-recovery on heartbeat return | Day 11 | ✅ |
+
+## Static analysis
+
+Application code is analysed with **Cppcheck** using the **MISRA C:2012** addon.
+
+- **Tool:** Cppcheck (run `cppcheck --version` and record the version here)
+- **Standard:** MISRA C:2012
+- **Scope:** application source only — HAL/CMSIS excluded via a suppressions list
+- **All mechanically-fixable findings corrected** — explicit type conversions (10.4), boolean conditions (14.4), braced `if` bodies (15.6), `switch` default clauses (16.4)
+- **Remaining findings are documented justified deviations** on advisory rules:
+  - **8.7** internal-linkage recommendations — functions intentionally shared across both nodes, so cannot be `static`
+  - **15.5** single-exit style — per-case returns in small lookup functions, kept for clarity
+
+See [`docs/misra_compliance.md`](docs/misra_compliance.md) for the full report, including the before → after finding counts.
 
 ## Architecture
 
@@ -124,17 +135,23 @@ Two STM32 nodes as peers on a shared, terminated CAN bus. Node A senses and tran
                     │                └────────────────────┘            │
 ```
 
+For the full technical reference — module breakdown, protocol, timing budget, scheduler, state machine, and design limitations — see [`docs/architecture.md`](docs/architecture.md).
+
 ## Repository structure
 
 ```
 Industrial Safety Monitoring CAN Network/
-├── CAN_Sender_Node/       # Node A — sensor node: BME280 read, state machine, CAN TX with integrity
-├── CAN_Receiver_Node/     # Node B — validator node: CAN RX, CRC + counter validation, watchdog, servo
-├── Python Log Code/       # Day 13 — listen-only CAN logger (can_logger.py) + matplotlib report (can_report.py)
-├── Project-Snaps/         # screenshots and hardware photos, organised by day
-├── REQUIREMENTS.md        # requirements specification with verification + traceability
-├── HARA.md                # hazard analysis and risk assessment (ISO 26262-style)
-├── LICENSE                # MIT
+├── CAN_Sender_Node/            # Node A — sensor node: BME280 read, state machine, CAN TX with integrity
+├── CAN_Receiver_Node/          # Node B — validator node: CAN RX, CRC + counter validation, watchdog, servo
+├── Python Log Code/            # Day 13 — listen-only CAN logger (can_logger.py) + matplotlib report (can_report.py)
+├── Project-Snaps/              # screenshots and hardware photos, organised by day
+├── docs/
+│   ├── requirements.md         # requirements specification with verification + traceability
+│   ├── hara.md                 # hazard analysis and risk assessment (ISO 26262-style)
+│   ├── architecture.md         # software architecture, protocol, timing, scheduler, state machine
+│   └── misra_compliance.md     # MISRA-C:2012 static-analysis report
+├── cppcheck_suppressions.txt   # HAL/CMSIS suppressions for the MISRA scan
+├── LICENSE                     # MIT
 └── README.md
 ```
 

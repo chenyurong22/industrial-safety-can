@@ -19,7 +19,12 @@ Release/
 .cproject.bak
 *.launch
 
-# ─── Python (for the future CAN logger) ───────────────────
+# ─── Static analysis artifacts (Cppcheck / MISRA) ─────────
+*.ctu-info
+*.dump
+cppcheck-build-dir/
+
+# ─── Python (CAN logger) ──────────────────────────────────
 __pycache__/
 *.pyc
 .venv/
