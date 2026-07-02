@@ -8,13 +8,14 @@ Run: python can_report.py
 Out: can_report.png  (+ printed summary, incl. bus-load estimate)
 """
 
+import os
 import sys
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
-CSV_PATH    = "can_log.csv"
-OUT_PATH    = "can_report.png"
+CSV_PATH    = r"E:\Projects\Industrial Safety Monitoring CAN Network\Python Log Code\can_log.csv"
+OUT_PATH    = os.path.join(os.path.dirname(CSV_PATH), "can_report.png")
 HB_TARGET   = 200.0     # ms, expected heartbeat period
 BITRATE     = 500000    # for bus-load estimate
 BITS_PER_FRAME = 130    # ~ standard 8-byte CAN frame incl. stuffing/overhead

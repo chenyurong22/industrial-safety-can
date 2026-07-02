@@ -483,7 +483,48 @@ The watchdog of Day 11 was validated by disconnecting the bus and reading the re
 
 </details>
 
+#### Day 13 (2026-07-02) — Python CAN logger: an independent third observer of the bus
 
+Days 9–12 built integrity and supervision *inside* the network — the receiver validates what the transmitter sends, and a logic analyzer confirms it at the bit level. Day 13 adds a fourth perspective from *outside* the two nodes: a PC-side Python logger that taps the live bus, decodes every frame in real time, and **independently re-implements the same integrity checks** the STM32 receiver performs. When the transmitter, the receiver, and an independently-written PC observer all agree on counter continuity and CRC validity, a single shared bug can no longer hide the truth — that cross-check is the point.
+
+**Passive tap via listen-only mode.** The Innomaker USB2CAN adapter joins the bus as a *third node*, driven directly through the `gs_usb` library in **listen-only mode** — it receives frames without ever ACKing or transmitting, so it cannot disturb the two-node network it is measuring. This is the correct posture for an analysis tool: an observer that perturbs the system it observes is worthless. (An earlier attempt in normal mode had the adapter actively ACKing, which collided with the real traffic and pushed Node B's loss rate to ~24% — the visible symptom that a logger must stay passive.)
+
+**Independent decode and re-validation.** `can_logger.py` parses both frame types — the `0x123` sensor frame (counter, temperature, state enum, application CRC-8) and the `0x100` heartbeat (counter + coarse uptime). For every sensor frame it **recomputes the CRC-8** (poly `0x07`) in Python and **re-derives counter gaps** (`(counter - last - 1) & 0xFF`), entirely independently of Node B's firmware. The 8-bit wrap arithmetic matches the sender's, so a legitimate 255→0 rollover correctly yields a gap of zero rather than a false alarm. Output streams live to the console and to a timestamped CSV.
+
+**Two-stage pipeline.** Following the same capture-then-report structure as Project 1, logging and analysis are separated: `can_logger.py` writes the CSV live; `can_report.py` reads it offline and produces a four-panel matplotlib report — temperature over time, heartbeat-interval histogram (clustered on the 200 ms target), sensor inter-frame timing, and a counter timeline with fault markers. Keeping the raw CSV independent of the plotting means a capture is never lost to a downstream error, and different reports can be regenerated from the same run without touching hardware.
+
+**Result — clean baseline.** With both nodes running normally, the logger confirms the network from its independent vantage point: the counter advances by exactly 1 every frame, `crc=OK` throughout, `lost=0`, heartbeats on a tight ~200 ms grid and sensor frames on ~100 ms. Three observers — transmitter, receiver, PC — in full agreement.
+
+<p align="center">
+  <img src="Project-Snaps/day13-python-logger/can_report_baseline.png" width="900">
+  <br>
+  <em>Four-panel bus report from a clean run (33 s, 333 sensor frames, 166 heartbeats). Heartbeat intervals cluster tightly on the 200 ms target and sensor spacing on 100 ms; the counter timeline is an unbroken sawtooth (the single vertical step is a legitimate 255→0 rollover, correctly reported as zero loss) with no fault markers. <code>lost=0</code>, <code>crcErr=0</code>.</em>
+</p>
+
+**Result — fault injection from a third angle.** Repeating the Day 11/12 disconnect while the logger runs, the bus goes silent for ~4 s; on reconnection the logger flags a single counter gap (~37 frames — those Node A transmitted into the dead bus) and localises the loss to exactly the disconnect window, with every surviving frame still `crc=OK`. This is the *same fault* already caught by Node B's heartbeat watchdog and the Day 12 logic-analyzer trace — now confirmed a third time, in independently-written PC code. The complementary-detection theme from Day 12 holds here too: total silence produces one clean gap at the boundary, not a stream of partial losses.
+
+<p align="center">
+  <img src="Project-Snaps/day13-python-logger/can_report_fault.png" width="900">
+  <br>
+  <em>Fault-injection capture. The bus is severed mid-stream: the heartbeat-interval and inter-frame-timing panels each show a single ~4 s outlier, and the counter timeline steps up once at reconnection with a lone orange gap marker — the frames lost during the outage. Loss is confined to the disconnect; no corruption elsewhere.</em>
+</p>
+
+<details>
+<summary><strong>Bringing up the adapter — the debugging chain that made it work</strong></summary>
+
+Getting a clean capture on Windows with a low-cost gs_usb adapter took a sequence of physical- and driver-layer fixes, each worth recording:
+
+- **Driver binding.** The adapter needs a libusb-class driver bound via Zadig (`libusbK`), plus a libusb backend for `pyusb` — `WinUSB` alone produced `[Errno 13] Access denied` on device claim.
+- **Sample point, not just bitrate.** Frames initially decoded as a garbled `0x00C` at ~1/15 the expected rate. Root cause was a **sample-point** mismatch: matching the 500 kbit/s bitrate is insufficient — the adapter (48 MHz clock) and the STM32 (42 MHz APB1, prescaler 6 / BS1 11 / BS2 2 → 75% sample point) must agree on *where in the bit* they sample.
+- **Termination at a passive tap.** The decisive fix. In normal mode the adapter's own transceiver drove the bus hard enough to *mask* a marginal tap (yielding corrupted frames); switching to listen-only removed that drive and exposed the real problem — with no proper termination at the tap point the receiver saw nothing. Restoring a clean ~60 Ω bus (adapter's onboard 120 Ω enabled, one node-end resistor lifted), short stubs, and all three lines (CAN_H, CAN_L, GND) solidly connected produced clean frames. *Normal mode can hide a bad tap by brute force; listen-only is the honest test of physical-layer integrity.*
+- **RX FIFO drain on startup.** The adapter can hold a stale frame from before capture begins; if it becomes the counter baseline, the first real frame reports a phantom gap. The logger now drains the FIFO before its main loop so only live frames enter the log.
+</details>
+
+<details>
+<summary><strong>Known limitation — reboot vs. mass loss (a firmware follow-up)</strong></summary>
+
+The logger cannot currently distinguish a Node A **reboot** from **mass frame loss**: a reboot resets the rolling counter toward zero, which looks identical to a large gap. The obvious disambiguator — the heartbeat's uptime — is a single byte (`(tick/100) mod 256`) that wraps every 25.6 s, and the heartbeat counter wraps every 51.2 s, so at those wrap points a healthy node momentarily *looks* reset. Any heuristic built on those two bytes would raise periodic false "reset" alarms. The correct fix is a dedicated **boot-counter** in one of the frame's reserved bytes (4–6), incremented only on power-on — making a reboot unambiguous. Documented here as a deliberate design note rather than papered over with a fragile timing hack.
+</details>
 
 ## Skills demonstrated
 
@@ -517,6 +558,8 @@ The watchdog of Day 11 was validated by disconnecting the bus and reading the re
 - Multi-ID CAN messaging: separate message IDs for data (0x123) and liveness/heartbeat (0x100) on one bus
 - Receiver-side ID demultiplexing — branching on StdId in the RX ISR to route frames into separate buffers
 - Protocol decoding from raw signals: reconstructing CAN frames (ID, DLC, data, CRC-15, ACK, EOF) from a captured logic-level bitstream with a software decoder
+- CAN sample-point matching (not just bitrate) across heterogeneous clocks — diagnosing mis-decoded frames caused by differing sample points between a 48 MHz adapter and a 42 MHz STM32
+- Bus termination for a passive analysis tap — recognising that a listen-only node still requires correct termination, and that normal-mode driving can mask a marginal physical connection
 
 ### Safety and integrity
 - Application-layer message integrity: CRC-8 (poly 0x07) over a structured payload, computed and validated independently of the CAN protocol's own CRC
@@ -555,6 +598,13 @@ The watchdog of Day 11 was validated by disconnecting the bus and reading the re
 - Physical-layer debugging: probing the transceiver's logic-level TXD line (not the differential CAN_H/CAN_L) to obtain a decodable digital signal
 - Hardware fault-injection testing: deliberately severing the bus mid-stream and capturing the consequence across physical, transmitter, and application layers simultaneously
 - Multi-layer evidence correlation: lining up a logic-analyzer trace, transmitter NACK errors, and application-level safe-state entry to prove a complete fault-to-containment chain
+- PC-side CAN capture bring-up: gs_usb adapter driver binding, listen-only configuration, stale-FIFO draining, and correlating an independent Python decode against the embedded receiver's own statistics
+
+### Python / PC-side tooling
+- CAN bus monitoring in Python via `gs_usb` direct device control (listen-only mode) — a passive third-node observer that does not perturb the network under test
+- Independent re-implementation of application-layer integrity (CRC-8 recompute, counter-gap detection) on a different platform to cross-check the embedded receiver
+- Real-time frame decode and timestamped CSV logging; offline matplotlib reporting (capture-then-report pipeline)
+- USB/driver bring-up on Windows: Zadig driver binding (libusbK), libusb backend for pyusb, RX-FIFO management
 
 ## Author
 

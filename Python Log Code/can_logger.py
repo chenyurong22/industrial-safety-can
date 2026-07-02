@@ -43,7 +43,7 @@ SENSOR_ID        = 0x123
 HEARTBEAT_ID     = 0x100
 TEMP_FRAC_SCALE  = 100.0
 STATE_NAMES      = {0: "NORMAL", 1: "WARNING", 2: "CRITICAL"}
-CSV_PATH         = "can_log.csv"
+CSV_PATH         = r"E:\Projects\Industrial Safety Monitoring CAN Network\Python Log Code\can_log.csv"
 
 
 def crc8(data: bytes) -> int:
@@ -71,13 +71,31 @@ def open_device() -> GsUsb:
     return dev
 
 
+def drain_stale_frames(dev: GsUsb) -> int:
+    """
+    Flush any frames already buffered in the adapter's RX FIFO before capture
+    begins. Without this, a pre-capture frame becomes the counter baseline and
+    the first real frame reports a phantom gap. Reads with a short timeout
+    until the FIFO empties (returns False on timeout).
+    """
+    scratch = GsUsbFrame()
+    n = 0
+    while dev.read(scratch, 5):   # 5 ms; False once no more buffered frames
+        n += 1
+        if n > 500:               # safety cap
+            break
+    return n
+
+
 def main():
     dev = open_device()
+    flushed = drain_stale_frames(dev)
+    print(f"Flushed {flushed} stale frame(s) from RX FIFO.")
     print(f"Listening (LISTEN-ONLY) @ {BITRATE} bit/s. Ctrl+C to stop.\n")
 
     rx = lost = crc_err = hb = 0
     last_counter = None
-    t0 = time.time()
+    t0 = time.time()   # start timing after the drain, so rel_time begins clean
 
     csv_file = open(CSV_PATH, "w", newline="")
     writer = csv.writer(csv_file)
