@@ -40,3 +40,4 @@ desktop.ini
 # ─── Logs and temp output ─────────────────────────────────
 *.log
 *.tmp
+can_log.csv
