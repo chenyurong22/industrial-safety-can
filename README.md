@@ -2,18 +2,64 @@
 
 A two-node CAN bus safety system built on STM32, demonstrating embedded safety patterns used in automotive and industrial control: message integrity (CRC, counters), heartbeat/watchdog monitoring, and deterministic safe-state transitions. Python-based CAN traffic logger included for analysis.
 
+## Demo
+
+<!-- Drop a 30–60 s screen recording named demo.gif into Project-Snaps/ and this will render.
+     Suggested sequence: temperature rising through state changes → CAN frames on both consoles
+     → servo moving → bus disconnect → watchdog safe-state → reconnect → recovery. -->
+<p align="center">
+  <img src="Project-Snaps/demo.gif" width="900">
+  <br>
+  <em>End-to-end demonstration: temperature-driven state changes, live CAN traffic, servo actuation, a heartbeat-timeout safe-state trip on bus disconnect, and automatic recovery.</em>
+</p>
+
 ## Kurzbeschreibung (Deutsch)
 
-Dieses Projekt ist ein sicherheitsgerichtetes CAN-Bus-Netzwerk aus zwei STM32-Knoten. Ein Sensorknoten misst die Temperatur und sendet Datenrahmen mit CRC-Prüfsumme sowie ein Heartbeat-Signal. Ein Überwachungsknoten prüft die Integrität der Nachrichten, steuert einen Aktor zustandsabhängig und geht in einen definierten sicheren Zustand über, wenn der Heartbeat länger als 500 ms ausbleibt. Ein Python-Logger überwacht den Bus unabhängig zur Analyse. Das Projekt demonstriert AUTOSAR-nahe Muster (DEM, COM, WdgM) in einfachem HAL-Code.
+Dieses Projekt ist ein sicherheitsgerichtetes CAN-Bus-Netzwerk aus zwei STM32-Knoten. Ein Sensorknoten misst die Temperatur und sendet Datenrahmen mit CRC-Prüfsumme sowie ein Heartbeat-Signal. Ein Überwachungsknoten prüft die Integrität der Nachrichten, steuert einen Aktor zustandsabhängig und geht in einen definierten sicheren Zustand über, wenn der Heartbeat länger als 500 ms ausbleibt. Ein Python-Logger überwacht den Bus unabhängig zur Analyse. Das Projekt orientiert sich an Kommunikations- und Überwachungsmustern aus AUTOSAR-Systemen (z. B. DEM, COM, WdgM), umgesetzt in einfachem HAL-Code.
 
-**Project status:** 🚧 In progress — Week 2 of 2
+**Project status:** ✅ Feature complete — 14-day build (Weeks 1–2)
+
+## Table of contents
+
+- [Goals](#goals)
+- [CAN frame reference](#can-frame-reference)
+- [Hardware](#hardware)
+- [Requirements & traceability](#requirements--traceability)
+- [Architecture](#architecture)
+- [Repository structure](#repository-structure)
+- [Build log](#build-log)
+  - [Week 1 — STM32 basics, I2C sensor, UART debugging](#week-1--stm32-basics-i2c-sensor-uart-debugging)
+  - [Week 2 — Application-layer integrity, heartbeat, safe state, logging](#week-2--application-layer-integrity-heartbeat-safe-state-logging)
+- [Skills demonstrated](#skills-demonstrated)
+- [Project achievements](#project-achievements)
+- [Author](#author)
 
 ## Goals
 
 - Build a working two-node CAN safety network on real hardware
-- Demonstrate AUTOSAR-flavoured patterns (DEM-like diagnostics, COM-like validation, WdgM-like watchdog) in plain HAL code
+- Demonstrate concepts inspired by communication and supervision patterns commonly used in AUTOSAR systems (e.g. DEM-like diagnostics, COM-like validation, WdgM-like watchdog) in plain HAL code — not AUTOSAR BSW modules themselves
 - Produce quantitative timing analysis with a Python logger
 - Document the build day-by-day as a learning record
+
+## CAN frame reference
+
+Quick reference for the two message types on the bus (full derivation in the Day 9 and Day 10 build-log entries).
+
+**Sensor frame — CAN ID `0x123`, DLC 8, every 100 ms**
+
+| Byte | 0 | 1 | 2 | 3 | 4–6 | 7 |
+|------|---|---|---|---|-----|---|
+| Field | Counter | Temp int | Temp frac (×100) | State enum | Reserved | CRC-8 |
+
+State enum: `0 = NORMAL`, `1 = WARNING`, `2 = CRITICAL`. CRC-8 (poly `0x07`) computed over bytes 0–6.
+
+**Heartbeat frame — CAN ID `0x100`, DLC 2, every 200 ms**
+
+| Byte | 0 | 1 |
+|------|---|---|
+| Field | Counter | Uptime (coarse, `tick/100`) |
+
+Bus: 500 kbit/s, 120 Ω termination at each end, 75 % sample point.
 
 ## Hardware
 
@@ -37,6 +83,46 @@ This project was built against an explicit requirements specification ([`REQUIRE
 Key safety requirement — **REQ-S-02:** *Node B shall detect the absence of heartbeats within 500 ms.* Verified at ~501 ms across the Day 11 and Day 12 fault-injection captures.
 
 A one-page hazard analysis ([`HARA.md`](HARA.md)) derives these safety requirements from six identified hazards using an ISO 26262-style Severity / Exposure / Controllability classification.
+
+**Representative verification results** (one per category; full per-requirement verification in [`REQUIREMENTS.md`](REQUIREMENTS.md)):
+
+| Requirement | Verification method | Result |
+|-------------|---------------------|--------|
+| REQ-F-04 — sensor frame every 100 ms | Decoded on the bus (logic analyzer + Python logger) | ✅ ~100 ms cadence confirmed |
+| REQ-I-02 — reject frames failing CRC-8 | CRC recomputed on Node B and independently in Python | ✅ `crcErr = 0`, cross-checked |
+| REQ-I-04 — detect lost frames | Real mid-stream gap during fault injection | ✅ gap counted correctly (Day 9/11/13) |
+| REQ-S-02 — heartbeat timeout within 500 ms | Bus severed, trip time measured | ✅ trips at ~501–502 ms (Day 11/12) |
+| REQ-S-06 — auto-recovery on heartbeat return | Bus restored after fault | ✅ one-shot `RECOVERED`, normal resumes |
+
+## Architecture
+
+Two STM32 nodes as peers on a shared, terminated CAN bus. Node A senses and transmits; Node B validates, supervises, and actuates. A Python logger taps the bus passively for independent analysis.
+
+```
+        NODE A  (Sender / Sensor)                       NODE B  (Receiver / Supervisor)
+        ┌───────────────────────┐                       ┌───────────────────────────┐
+        │ BME280  (I2C)          │                       │ CRC-8 validation          │
+        │   ↓                    │                       │   ↓                       │
+        │ State machine          │                       │ Counter / lost-frame check│
+        │  (hysteresis)          │                       │   ↓                       │
+        │   ↓                    │                       │ Heartbeat watchdog (500ms)│
+        │ CRC-8 + rolling counter│                       │   ↓                       │
+        │   ↓                    │                       │ Safe-state logic          │
+        │ CAN TX:                │                       │   ↓                       │
+        │  0x123 sensor  (100ms) │                       │ Servo (PWM) — state /     │
+        │  0x100 heartbeat(200ms)│                       │   fail-safe actuation     │
+        └───────────┬───────────┘                       └─────────────┬─────────────┘
+                    │                                                 │
+      ══════════════╪═════════════════ CAN BUS (500 kbit/s) ═════════╪══════════════
+       120 Ω term ──┤                         │                       ├── 120 Ω term
+                    │                          │                       │
+                    │                ┌─────────┴──────────┐            │
+                    │                │ Python logger      │            │
+                    │                │ (listen-only tap)  │            │
+                    │                │ CRC + counter      │            │
+                    │                │ re-validation, CSV │            │
+                    │                └────────────────────┘            │
+```
 
 ## Repository structure
 
@@ -628,6 +714,22 @@ The logger cannot currently distinguish a Node A **reboot** from **mass frame lo
 - Independent re-implementation of application-layer integrity (CRC-8 recompute, counter-gap detection) on a different platform to cross-check the embedded receiver
 - Real-time frame decode and timestamped CSV logging; offline matplotlib reporting (capture-then-report pipeline)
 - USB/driver bring-up on Windows: Zadig driver binding (libusbK), libusb backend for pyusb, RX-FIFO management
+
+## Project achievements
+
+This project demonstrates, end to end on real hardware:
+
+- Two-node STM32 CAN communication at 500 kbit/s
+- Modular embedded C architecture (drivers / policy / orchestration)
+- Application-layer CRC-8 integrity, independent of the CAN protocol CRC
+- Rolling message counters with lost-frame detection
+- Independent heartbeat liveness supervision
+- Heartbeat-timeout watchdog with deterministic safe-state transition (~501 ms)
+- Servo fail-safe actuation with a defined safe position, honest power-integrity handling
+- Physical-layer verification with a logic analyzer (three-layer fault evidence)
+- An independent Python CAN logger (listen-only) cross-checking the receiver
+- Requirements-driven development with explicit REQ-IDs and verification
+- A one-page ISO 26262-inspired HARA deriving safety goals from hazards
 
 ## Author
 

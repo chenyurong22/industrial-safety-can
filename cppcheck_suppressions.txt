@@ -1,0 +1,19 @@
+# Ignore STM32 HAL/CMSIS third-party code
+*:Drivers/*
+*:Middlewares/*
+*:CMSIS/*
+
+# Ignore generated startup files
+*:system_stm32f4xx.c
+*:stm32f4xx_it.c
+*:stm32f4xx_hal_msp.c
+
+# Ignore configuration limitations
+misra-config
+
+# Ignore missing standard headers
+missingIncludeSystem
+missingInclude
+
+# Ignore Cppcheck noise
+checkersReport
