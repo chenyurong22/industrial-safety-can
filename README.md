@@ -2,6 +2,10 @@
 
 A two-node CAN bus safety system built on STM32, demonstrating embedded safety patterns used in automotive and industrial control: message integrity (CRC, counters), heartbeat/watchdog monitoring, and deterministic safe-state transitions. Python-based CAN traffic logger included for analysis.
 
+## Kurzbeschreibung (Deutsch)
+
+Dieses Projekt ist ein sicherheitsgerichtetes CAN-Bus-Netzwerk aus zwei STM32-Knoten. Ein Sensorknoten misst die Temperatur und sendet Datenrahmen mit CRC-Prüfsumme sowie ein Heartbeat-Signal. Ein Überwachungsknoten prüft die Integrität der Nachrichten, steuert einen Aktor zustandsabhängig und geht in einen definierten sicheren Zustand über, wenn der Heartbeat länger als 500 ms ausbleibt. Ein Python-Logger überwacht den Bus unabhängig zur Analyse. Das Projekt demonstriert AUTOSAR-nahe Muster (DEM, COM, WdgM) in einfachem HAL-Code.
+
 **Project status:** 🚧 In progress — Week 2 of 2
 
 ## Goals
@@ -20,12 +24,33 @@ A two-node CAN bus safety system built on STM32, demonstrating embedded safety p
 - 1× Innomaker USB-CAN adapter for PC-side logging
 - 120 Ω termination resistors, breadboard, jumper wires
 
+## Requirements & traceability
+
+This project was built against an explicit requirements specification ([`REQUIREMENTS.md`](REQUIREMENTS.md)) — 22 requirements across functional, integrity, and safety categories, each with a rationale and a verification method (test / analysis / inspection) tied to the evidence in the build log below. Requirement IDs are referenced from commit messages to give lightweight V-model traceability from requirement → implementation → demonstrated result.
+
+| Category | IDs | Covers |
+|----------|-----|--------|
+| Functional | REQ-F-01 … F-08 | Sensing, state classification with hysteresis, CAN TX/RX, bus parameters, actuation, passive logging |
+| Integrity | REQ-I-01 … I-06 | Application-layer CRC-8, rolling counter, lost-frame detection, running statistics, independent PC cross-check |
+| Safety | REQ-S-01 … S-08 | Heartbeat liveness, 500 ms watchdog, edge-triggered safe state, fail-safe actuation, auto-recovery, startup grace, rate-limited actuation |
+
+Key safety requirement — **REQ-S-02:** *Node B shall detect the absence of heartbeats within 500 ms.* Verified at ~501 ms across the Day 11 and Day 12 fault-injection captures.
+
+A one-page hazard analysis ([`HARA.md`](HARA.md)) derives these safety requirements from six identified hazards using an ISO 26262-style Severity / Exposure / Controllability classification.
+
 ## Repository structure
+
+```
 Industrial Safety Monitoring CAN Network/
-├── CAN_Sender_Node/      # Node A — sensor node: BME280 read, state machine, CAN TX with integrity
-├── CAN_Receiver_Node/    # Node B — validator node: CAN RX, CRC + counter validation, statistics
-├── Project-Snaps/        # screenshots and hardware photos, organised by day
-└── ...                   # (Python logger and further sub-projects added as work progresses)
+├── CAN_Sender_Node/       # Node A — sensor node: BME280 read, state machine, CAN TX with integrity
+├── CAN_Receiver_Node/     # Node B — validator node: CAN RX, CRC + counter validation, watchdog, servo
+├── Python Log Code/       # Day 13 — listen-only CAN logger (can_logger.py) + matplotlib report (can_report.py)
+├── Project-Snaps/         # screenshots and hardware photos, organised by day
+├── REQUIREMENTS.md        # requirements specification with verification + traceability
+├── HARA.md                # hazard analysis and risk assessment (ISO 26262-style)
+├── LICENSE                # MIT
+└── README.md
+```
 
 ## Build log
 
@@ -528,8 +553,6 @@ The logger cannot currently distinguish a Node A **reboot** from **mass frame lo
 
 ## Skills demonstrated
 
-*(this section grows as work progresses)*
-
 ### Embedded C
 - Bitmasks and bitwise operators (`<<`, `^=`, `|=`, `&= ~`); `volatile` keyword for memory-mapped I/O
 - `enum` / `typedef` discipline for self-documenting state types
@@ -545,7 +568,6 @@ The logger cannot currently distinguish a Node A **reboot** from **mass frame lo
 - `.ioc` regeneration discipline — adding peripherals mid-project (I2C on Day 3) without losing user code
 - Non-blocking cooperative scheduling via `HAL_GetTick()` — replacing blocking `HAL_Delay()` to run independent periodic tasks at different rates
 - Timer PWM generation: `TIM3_CH1` at 50 Hz with a 1 µs tick (`PSC`/`ARR` chosen so the compare register maps directly to pulse width in µs)
-
 
 ### Communication protocols
 - I2C bus: 7-bit addressing, master-slave model, bus scanning, register-based sensor protocols
@@ -572,6 +594,7 @@ The logger cannot currently distinguish a Node A **reboot** from **mass frame lo
 - Fail-safe actuator design: a distinct, defined safe position separate from all normal operating angles
 - Startup grace period to suppress spurious safe-state entry before the first heartbeat arrives
 - Complementary fault detection: heartbeat watchdog (liveness) and rolling-counter gaps (frame accounting) catching the same fault from two angles
+- Requirements-driven development: explicit requirements specification with verification methods and a one-page ISO 26262-style HARA deriving safety goals from identified hazards
 
 ### Sensor integration
 - BME280 wiring (I2C + 3.3V power), chip ID verification pattern
